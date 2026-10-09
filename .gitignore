@@ -1,0 +1,23 @@
+﻿# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+id_rsa
+credentials.json
+secrets.*
+
+# Go build artifacts
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+coverage.out
+
+# Local development
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

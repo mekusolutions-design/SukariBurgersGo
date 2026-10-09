@@ -1,0 +1,16 @@
+FROM golang:1.23-alpine AS build
+WORKDIR /src
+RUN apk add --no-cache git ca-certificates
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /restflow-worker ./cmd/worker
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates tzdata && adduser -D -u 1000 restflow
+USER restflow
+WORKDIR /app
+COPY --from=build /restflow-worker /app/restflow-worker
+ENV RESTFLOW_ROLE=worker
+ENTRYPOINT ["/app/restflow-worker"]
+CMD ["run"]

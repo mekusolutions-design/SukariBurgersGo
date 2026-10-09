@@ -1,0 +1,56 @@
+openapi: 3.0.3
+info:
+  title: RestFlow Go API
+  version: 1.0.0
+  description: Event-sourced restaurant inventory & POS system (Go migration)
+servers:
+  - url: /
+paths:
+  /health/live:
+    get:
+      summary: Liveness
+      responses:
+        "200":
+          description: OK
+  /health/ready:
+    get:
+      summary: Readiness
+      responses:
+        "200":
+          description: Ready
+  /auth/login:
+    post:
+      summary: Login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "200":
+          description: JWT + user
+  /pos/order:
+    post:
+      summary: Create POS order (server-side stock resolution)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Order created
+  /kitchen/active-orders:
+    get:
+      summary: Active kitchen queue
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Orders
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
