@@ -305,6 +305,37 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		brows.Close()
 	}
 
+	// Name → stock index (menu "300 ml SODA" vs inventory "300ml soda")
+	stockByName := map[string]float64{}
+	nrows, nerr := s.pool.Query(ctx, `
+		SELECT i.item_id, i.name, COALESCE(p.available_stock, 0)
+		FROM "Item" i
+		LEFT JOIN "InventoryProjection" p
+		  ON p.item_id = i.item_id AND p.shop_id = $1
+	`, shopID)
+	if nerr == nil && nrows != nil {
+		for nrows.Next() {
+			var id, name string
+			var avail float64
+			if nrows.Scan(&id, &name, &avail) != nil {
+				continue
+			}
+			if avail <= 0 {
+				avail = stockLookup(stock, id)
+			}
+			if avail <= 0 {
+				continue
+			}
+			stock[id] = maxFloat(stockLookup(stock, id), avail)
+			for _, key := range stockNameKeys(name, id) {
+				if prev, ok := stockByName[key]; !ok || avail > prev {
+					stockByName[key] = avail
+				}
+			}
+		}
+		nrows.Close()
+	}
+
 	out := make([]map[string]interface{}, 0, len(order))
 	for _, id := range order {
 		m := byID[id]
@@ -377,6 +408,19 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		// Menus with no linked lines/stock still appear; availability shows 0 / 86'd
 		if maxP < 0 {
 			maxP = 0
+		}
+		// Name-based stock: FIXED menu with no/mismatched finished_good_id (sodas/juices)
+		if maxP == 0 {
+			need := m.quantityRequired
+			if need <= 0 {
+				need = 1
+			}
+			if av := stockByNameLookup(stockByName, m.name, m.code, m.menuID); av > 0 {
+				maxP = int(av / need)
+				if maxP < 0 {
+					maxP = 0
+				}
+			}
 		}
 		// Sellable without stock linkage (price-only): show as available for order UI
 		if maxP == 0 && len(normLines) == 0 && m.price > 0 {
@@ -722,4 +766,67 @@ func nilIfEmpty(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+
+func maxFloat(a, b float64) float64 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func normalizeStockKey(s string) string {
+	s = strings.ToLower(strings.TrimSpace(s))
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func stockNameKeys(name, itemID string) []string {
+	keys := []string{}
+	seen := map[string]bool{}
+	add := func(k string) {
+		k = normalizeStockKey(k)
+		if k == "" || seen[k] {
+			return
+		}
+		seen[k] = true
+		keys = append(keys, k)
+	}
+	add(name)
+	add(itemID)
+	// "300 ml SODA" / "300ml soda" / "SODA 300ML"
+	n := strings.ToLower(name + " " + itemID)
+	add(strings.ReplaceAll(n, " ", ""))
+	return keys
+}
+
+func stockByNameLookup(byName map[string]float64, parts ...string) float64 {
+	best := 0.0
+	for _, p := range parts {
+		for _, k := range stockNameKeys(p, "") {
+			if v, ok := byName[k]; ok && v > best {
+				best = v
+			}
+		}
+	}
+	// Partial contains: menu "PASSION JUICE" vs item "Passion juice"
+	if best <= 0 {
+		joined := normalizeStockKey(strings.Join(parts, " "))
+		if len(joined) >= 4 {
+			for k, v := range byName {
+				if strings.Contains(k, joined) || strings.Contains(joined, k) {
+					if v > best {
+						best = v
+					}
+				}
+			}
+		}
+	}
+	return best
 }
