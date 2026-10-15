@@ -120,7 +120,7 @@ func New(d Deps) http.Handler {
 	mux.Handle("POST /payment/stripe", protect(a, rolePOS, d.PaymentH.CreateStripeIntent))
 	mux.Handle("POST /pos/order", protect(a, rolePOS, d.POSH.CreateOrder))
 	mux.Handle("GET /pos/menu-availability", protect(a, rolePOS, d.POSH.MenuAvailability))
-	mux.Handle("GET /pos/bootstrap", protect(a, rolePOS, d.POSH.Bootstrap))
+	mux.Handle("GET /pos/bootstrap", protect(a, rolePOSKit, d.POSH.Bootstrap))
 	mux.Handle("GET /pos/orders", protect(a, rolePOS, d.POSH.ListOrders))
 	mux.Handle("GET /pos/orders/{orderId}", protect(a, rolePOS, d.POSH.GetOrder))
 	mux.Handle("POST /pos/orders/{orderId}/send-to-kitchen", protect(a, rolePOS, d.POSH.SendToKitchen))

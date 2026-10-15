@@ -122,8 +122,9 @@ func (s *Service) CreateOrder(ctx context.Context, in CreateOrderInput) (*Create
 		LineTotal       float64                    `json:"line_total"`
 		FoodCost        float64                    `json:"food_cost"`
 		StockDeductions []menu.StockDeduction      `json:"stock_deductions"`
-		Selections      []menu.ResolvedMenuItem    `json:"selections,omitempty"`
-		ComboSelections []menu.ComboSelectionInput `json:"combo_selections,omitempty"`
+		Selections              []menu.ResolvedMenuItem    `json:"selections,omitempty"`
+		ComboSelections         []menu.ComboSelectionInput `json:"combo_selections,omitempty"`
+		ComboSelectionsEnriched []map[string]interface{}   `json:"-"`
 	}
 
 	var enriched []enrichedLine
@@ -156,11 +157,50 @@ func (s *Service) CreateOrder(ctx context.Context, in CreateOrderInput) (*Create
 			if qty > 0 {
 				unitPrice = resolved.Revenue / qty
 			}
+			// Nest parity: ticket-friendly combo_selections with menu_item_names + group_name
+			comboSelOut := make([]map[string]interface{}, 0, len(line.ComboSelections))
+			for _, cs := range line.ComboSelections {
+				names := make([]string, 0, len(cs.MenuItemIDs))
+				var groupName string
+				for _, id := range cs.MenuItemIDs {
+					nm := id
+					for _, mi := range resolved.MenuItems {
+						if mi.MenuItemID == id {
+							if mi.Name != "" {
+								nm = mi.Name
+							}
+							if mi.GroupName != "" {
+								groupName = mi.GroupName
+							}
+							if mi.GroupIndex != nil && *mi.GroupIndex == cs.GroupIndex && mi.GroupName != "" {
+								groupName = mi.GroupName
+							}
+							break
+						}
+					}
+					names = append(names, nm)
+				}
+				if groupName == "" {
+					for _, mi := range resolved.MenuItems {
+						if mi.GroupIndex != nil && *mi.GroupIndex == cs.GroupIndex && mi.GroupName != "" {
+							groupName = mi.GroupName
+							break
+						}
+					}
+				}
+				comboSelOut = append(comboSelOut, map[string]interface{}{
+					"group_index":     cs.GroupIndex,
+					"group_name":      groupName,
+					"menu_item_ids":   cs.MenuItemIDs,
+					"menu_item_names": names,
+				})
+			}
 			el := enrichedLine{
 				LineType: "combo", ComboID: line.ComboID, Name: resolved.Label,
 				Quantity: qty, UnitPrice: unitPrice, LineTotal: unitPrice * qty,
 				FoodCost: foodCost, StockDeductions: resolved.StockDeductions,
 				Selections: resolved.MenuItems, ComboSelections: line.ComboSelections,
+				ComboSelectionsEnriched: comboSelOut,
 			}
 			enriched = append(enriched, el)
 			allDeductions = append(allDeductions, resolved.StockDeductions...)
@@ -256,11 +296,22 @@ func (s *Service) CreateOrder(ctx context.Context, in CreateOrderInput) (*Create
 		}
 		if e.MenuItemID != "" {
 			item["menu_item_id"] = e.MenuItemID
+			item["menu_id"] = e.MenuItemID
+			item["item_id"] = e.MenuItemID
+			item["selling_price"] = e.UnitPrice
 		}
 		if e.ComboID != "" {
 			item["combo_id"] = e.ComboID
-			item["combo_selections"] = e.ComboSelections
+			item["menu_id"] = e.ComboID
+			item["item_id"] = e.ComboID
+			if len(e.ComboSelectionsEnriched) > 0 {
+				item["combo_selections"] = e.ComboSelectionsEnriched
+			} else {
+				item["combo_selections"] = e.ComboSelections
+			}
 			item["selections"] = e.Selections
+			item["resolved_menu_items"] = e.Selections
+			item["selling_price"] = e.UnitPrice
 		}
 		itemsPayload = append(itemsPayload, item)
 	}
