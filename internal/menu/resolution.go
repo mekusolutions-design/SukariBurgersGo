@@ -1153,21 +1153,44 @@ func AggregateDeductions(rows []StockDeduction) []StockDeduction {
 // CheckAvailability ensures enough stock for deductions.
 func (s *ResolutionService) CheckAvailability(ctx context.Context, shopID string, deductions []StockDeduction) error {
 	for _, d := range deductions {
-		const q = `
-			SELECT COALESCE(available_stock, 0)
-			FROM "InventoryProjection"
-			WHERE shop_id = $1 AND item_id = $2
-		`
-		var avail float64
-		err := s.pool.QueryRow(ctx, q, shopID, d.ItemID).Scan(&avail)
+		avail, err := s.lookupAvailableStock(ctx, shopID, d.ItemID)
 		if err != nil || avail < d.Quantity {
+			have := avail
+			if err != nil {
+				have = 0
+			}
 			return apperrors.BadRequest(fmt.Sprintf(
 				"Insufficient stock for %s (%s): need %.4f, have %.4f",
-				d.ItemName, d.ItemID, d.Quantity, avail,
+				d.ItemName, d.ItemID, d.Quantity, have,
 			))
 		}
 	}
 	return nil
+}
+
+// lookupAvailableStock reads InventoryProjection with exact then case-insensitive item_id.
+func (s *ResolutionService) lookupAvailableStock(ctx context.Context, shopID, itemID string) (float64, error) {
+	const qExact = `
+		SELECT COALESCE(available_stock, 0)
+		FROM "InventoryProjection"
+		WHERE shop_id = $1 AND item_id = $2
+	`
+	var avail float64
+	err := s.pool.QueryRow(ctx, qExact, shopID, itemID).Scan(&avail)
+	if err == nil {
+		return avail, nil
+	}
+	const qCI = `
+		SELECT COALESCE(available_stock, 0)
+		FROM "InventoryProjection"
+		WHERE shop_id = $1 AND lower(item_id) = lower($2)
+		LIMIT 1
+	`
+	err2 := s.pool.QueryRow(ctx, qCI, shopID, itemID).Scan(&avail)
+	if err2 != nil {
+		return 0, err2
+	}
+	return avail, nil
 }
 
 // CheckAvailabilityTx verifies stock under a transaction with row locks (FOR UPDATE).

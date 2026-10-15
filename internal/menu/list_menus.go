@@ -241,6 +241,12 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			var a float64
 			if srows.Scan(&id, &a) == nil {
 				stock[id] = a
+				// Mirror keys so menu item_ids with different casing still resolve
+				if u := strings.ToUpper(id); u != id {
+					if _, exists := stock[u]; !exists {
+						stock[u] = a
+					}
+				}
 			}
 		}
 		srows.Close()
@@ -413,7 +419,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				if oid == "" {
 					continue
 				}
-				st := stock[oid]
+				st := stockLookup(stock, oid)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": firstNonEmpty(firstStr(om, "finishedGoodName", "name"), oid),
@@ -428,7 +434,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				if oid == "" {
 					continue
 				}
-				st := stock[oid]
+				st := stockLookup(stock, oid)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": oid, "unit": "pcs",
@@ -467,47 +473,74 @@ func portionsFromLines(lines []map[string]interface{}, stock map[string]float64)
 		if need <= 0 {
 			need = 1
 		}
-		ids := []string{}
-		if fg := firstStr(lm, "finishedGoodId", "finished_good_id"); fg != "" {
-			ids = append(ids, fg)
-		}
-		ids = append(ids, stringSliceAny(lm["option_item_ids"])...)
-		ids = append(ids, stringSliceAny(lm["optionItemIds"])...)
+
+		fg := firstStr(lm, "finishedGoodId", "finished_good_id", "inventory_item_id", "inventoryItemId")
+		optIDs := stringSliceAny(lm["option_item_ids"])
+		optIDs = append(optIDs, stringSliceAny(lm["optionItemIds"])...)
 		if opts, ok := lm["options"].([]map[string]interface{}); ok {
 			for _, o := range opts {
-				if oid := firstStr(o, "finishedGoodId", "finished_good_id"); oid != "" {
-					ids = append(ids, oid)
+				if oid := firstStr(o, "finishedGoodId", "finished_good_id", "item_id", "itemId"); oid != "" {
+					optIDs = append(optIDs, oid)
 				}
 			}
 		}
 		if opts, ok := lm["options"].([]interface{}); ok {
 			for _, o := range opts {
 				if om, ok := o.(map[string]interface{}); ok {
-					if oid := firstStr(om, "finishedGoodId", "finished_good_id"); oid != "" {
-						ids = append(ids, oid)
+					if oid := firstStr(om, "finishedGoodId", "finished_good_id", "item_id", "itemId"); oid != "" {
+						optIDs = append(optIDs, oid)
 					}
 				}
 			}
 		}
-		if len(ids) == 0 {
-			continue
-		}
-		if firstFG == "" {
-			firstFG = ids[0]
-		}
-		if ct == "CHOICE" || ct == "MULTI_CHOICE" {
+
+		// Nest parity:
+		// FIXED / INVENTORY → stock of finished_good_id only (not min of every option).
+		// CHOICE / MULTI_CHOICE → sum of option stocks / need.
+		// FIXED with only option_item_ids (inventory-select) → sum options (any usable SKU).
+		switch ct {
+		case "CHOICE", "MULTI_CHOICE":
+			ids := optIDs
+			if fg != "" {
+				ids = append([]string{fg}, ids...)
+			}
+			if len(ids) == 0 {
+				continue
+			}
+			if firstFG == "" {
+				firstFG = ids[0]
+			}
 			total := 0.0
 			for _, id := range ids {
-				total += stock[id]
+				total += stockLookup(stock, id)
 			}
 			p := int(total / need)
 			if p < maxP {
 				maxP = p
 			}
-			continue
-		}
-		for _, id := range ids {
-			p := int(stock[id] / need)
+		default: // FIXED, INVENTORY, empty
+			if fg != "" {
+				if firstFG == "" {
+					firstFG = fg
+				}
+				p := int(stockLookup(stock, fg) / need)
+				if p < maxP {
+					maxP = p
+				}
+				continue
+			}
+			// Inventory-select FIXED without finished_good_id: options only
+			if len(optIDs) == 0 {
+				continue
+			}
+			if firstFG == "" {
+				firstFG = optIDs[0]
+			}
+			total := 0.0
+			for _, id := range optIDs {
+				total += stockLookup(stock, id)
+			}
+			p := int(total / need)
 			if p < maxP {
 				maxP = p
 			}
@@ -521,6 +554,32 @@ func portionsFromLines(lines []map[string]interface{}, stock map[string]float64)
 	}
 	return maxP, firstFG
 }
+
+// stockLookup resolves InventoryProjection qty with case-insensitive item_id fallback.
+func stockLookup(stock map[string]float64, itemID string) float64 {
+	if itemID == "" {
+		return 0
+	}
+	if v, ok := stock[itemID]; ok {
+		return v
+	}
+	// Case variants (menu events vs projection keys)
+	up := strings.ToUpper(itemID)
+	if v, ok := stock[up]; ok {
+		return v
+	}
+	low := strings.ToLower(itemID)
+	if v, ok := stock[low]; ok {
+		return v
+	}
+	for k, v := range stock {
+		if strings.EqualFold(k, itemID) {
+			return v
+		}
+	}
+	return 0
+}
+
 
 func stringSliceAny(v interface{}) []string {
 	out := []string{}
