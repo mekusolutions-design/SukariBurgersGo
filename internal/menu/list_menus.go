@@ -23,6 +23,9 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		visible                      bool
 		status                       string
 		lines                        []map[string]interface{}
+		finishedGoodID               string
+		quantityRequired             float64
+		unit                         string
 	}
 	byID := map[string]*menuRow{}
 	order := []string{}
@@ -72,6 +75,24 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		}
 
 		m := upsert(menuID)
+
+		// Nest: root finished_good_id / inventory_item_id on menu or primary FIXED line
+		if fg := firstStr(p, "finished_good_id", "finishedGoodId", "inventory_item_id", "inventoryItemId", "item_id", "itemId"); fg != "" {
+			// Prefer non-MENU ids as stock SKU (MENU-* is commercial id, not inventory)
+			if !strings.HasPrefix(strings.ToUpper(fg), "MENU-") {
+				m.finishedGoodID = fg
+			} else if m.finishedGoodID == "" {
+				m.finishedGoodID = fg
+			}
+		}
+		if q := floatAny(p["quantity_required"]); q > 0 {
+			m.quantityRequired = q
+		} else if q := floatAny(p["quantityRequired"]); q > 0 {
+			m.quantityRequired = q
+		}
+		if u := firstStr(p, "unit"); u != "" {
+			m.unit = u
+		}
 
 		if et == "menu_created" || et == "MENU_CREATED" || et == "menu_item_created" {
 			if n := firstStr(p, "name", "menu_name", "menuName"); n != "" {
@@ -252,6 +273,31 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		srows.Close()
 	}
 
+	// Fallback: sum open InventoryBatch remaining when projection row missing/zero
+	brows, berr := s.pool.Query(ctx, `
+		SELECT item_id, COALESCE(SUM(remaining_qty), 0)
+		FROM "InventoryBatch"
+		WHERE shop_id = $1 AND COALESCE(remaining_qty, 0) > 0
+		GROUP BY item_id`, shopID)
+	if berr == nil && brows != nil {
+		for brows.Next() {
+			var id string
+			var qty float64
+			if brows.Scan(&id, &qty) == nil && id != "" {
+				cur := stockLookup(stock, id)
+				if qty > cur {
+					stock[id] = qty
+					if u := strings.ToUpper(id); u != id {
+						if _, exists := stock[u]; !exists {
+							stock[u] = qty
+						}
+					}
+				}
+			}
+		}
+		brows.Close()
+	}
+
 	out := make([]map[string]interface{}, 0, len(order))
 	for _, id := range order {
 		m := byID[id]
@@ -267,8 +313,59 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if m.code == "" {
 			m.code = m.menuID
 		}
-		normLines, reqSel := normalizeMenuLines(m.lines, stock)
+		linesIn := m.lines
+		// Nest: if no component lines but menu has finishedGoodId, synthesize FIXED line
+		if len(linesIn) == 0 && m.finishedGoodID != "" {
+			need := m.quantityRequired
+			if need <= 0 {
+				need = 1
+			}
+			unit := m.unit
+			if unit == "" {
+				unit = "pcs"
+			}
+			linesIn = []map[string]interface{}{
+				{
+					"componentType": "FIXED", "component_type": "FIXED",
+					"componentKey": "main", "component_key": "main",
+					"finishedGoodId": m.finishedGoodID, "finished_good_id": m.finishedGoodID,
+					"quantityRequired": need, "quantity_required": need,
+					"unit": unit,
+				},
+			}
+		}
+		// If lines exist but none carry a stock SKU, attach root FG as FIXED
+		if m.finishedGoodID != "" {
+			hasSKU := false
+			for _, lm := range linesIn {
+				if firstStr(lm, "finishedGoodId", "finished_good_id", "inventory_item_id") != "" {
+					hasSKU = true
+					break
+				}
+				if len(stringSliceAny(lm["option_item_ids"])) > 0 || len(stringSliceAny(lm["optionItemIds"])) > 0 {
+					hasSKU = true
+					break
+				}
+			}
+			if !hasSKU {
+				need := m.quantityRequired
+				if need <= 0 {
+					need = 1
+				}
+				linesIn = append(linesIn, map[string]interface{}{
+					"componentType": "FIXED", "component_type": "FIXED",
+					"componentKey": "main_fg", "component_key": "main_fg",
+					"finishedGoodId": m.finishedGoodID, "finished_good_id": m.finishedGoodID,
+					"quantityRequired": need, "quantity_required": need,
+					"unit": firstNonEmpty(m.unit, "pcs"),
+				})
+			}
+		}
+		normLines, reqSel := normalizeMenuLines(linesIn, stock)
 		maxP, fgID := portionsFromLines(normLines, stock)
+		if fgID == "" && m.finishedGoodID != "" {
+			fgID = m.finishedGoodID
+		}
 		// Fast path only — no per-menu ResolveMenuItemLine (that made POS load 30s+)
 		// Menus with no linked lines/stock still appear; availability shows 0 / 86'd
 		if maxP < 0 {
