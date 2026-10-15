@@ -251,6 +251,13 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				m.price = c.SellingPrice
 			}
 		}
+		// Catalog stocked SKU → POS FIXED availability (sodas, direct inventory)
+		if c.StockItemID != nil {
+			sid := strings.TrimSpace(*c.StockItemID)
+			if sid != "" && m.finishedGoodID == "" {
+				m.finishedGoodID = sid
+			}
+		}
 	}
 
 	// stock map
@@ -275,9 +282,9 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 
 	// Fallback: sum open InventoryBatch remaining when projection row missing/zero
 	brows, berr := s.pool.Query(ctx, `
-		SELECT item_id, COALESCE(SUM(remaining_qty), 0)
+		SELECT item_id, COALESCE(SUM(qty_remaining), 0)
 		FROM "InventoryBatch"
-		WHERE shop_id = $1 AND COALESCE(remaining_qty, 0) > 0
+		WHERE shop_id = $1 AND COALESCE(qty_remaining, 0) > 0
 		GROUP BY item_id`, shopID)
 	if berr == nil && brows != nil {
 		for brows.Next() {
