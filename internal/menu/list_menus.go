@@ -25,7 +25,6 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		visible                      bool
 		status                       string
 		lines                        []map[string]interface{}
-		recipeID                     string
 	}
 	byID := map[string]*menuRow{}
 	order := []string{}
@@ -68,9 +67,6 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			return
 		}
 		m := upsert(menuID)
-		if rid := firstStr(p, "recipe_id", "recipeId"); rid != "" {
-			m.recipeID = rid
-		}
 
 		isCreate := et == "menu_created" || et == "menu_item_created"
 		if isCreate {
@@ -307,7 +303,6 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 
 	// CatalogMenuItem merge
 	catalog, _ := s.ListCatalog(ctx, shopID)
-	recipeCache := map[string][]StockDeduction{}
 	for _, c := range catalog {
 		id := strings.TrimSpace(c.MenuItemID)
 		if id == "" {
@@ -329,15 +324,10 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			}
 		}
 
-		// Always take catalog recipe_id / stock_item_id so POS matches Menu (Nest).
-		// Event lines alone are often incomplete (e.g. lettuce only) — without
-		// catalog recipe_id, burgers never see bacon/cheddar constraints.
-		if c.RecipeID != nil {
-			if rid := strings.TrimSpace(*c.RecipeID); rid != "" {
-				m.recipeID = rid
-			}
-		}
-		// Only materialize stock_item FIXED when no component lines yet (sodas, etc.)
+		// Nest listMenus does NOT expand RecipeIngredient for availability chips.
+		// Event FIXED lines are the BOM (lettuce, bacon g, cheddar g, …).
+		// Only when there are zero event lines, materialize catalog stock_item_id
+		// (sodas / bags). Never replace full event lines with a second BOM.
 		if len(m.lines) == 0 {
 			stockItemID := ""
 			if c.StockItemID != nil {
@@ -394,20 +384,14 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if m.code == "" {
 			m.code = m.menuID
 		}
-		linesIn := m.lines
-		// Nest parity: when catalog/event carries recipe_id, constrain by full BOM
-		// (same numeric min Nest shows when lines include every ingredient).
-		if rid := strings.TrimSpace(m.recipeID); rid != "" {
-			linesIn = s.enrichExplicitRecipe(ctx, shopID, rid, linesIn, recipeCache)
-		}
-		normLines, reqSel := normalizeMenuLines(linesIn, stock, stockUnits)
+		normLines, reqSel := normalizeMenuLines(m.lines, stock, stockUnits)
 		maxP, fgID := portionsFromLines(normLines, stock, stockUnits)
 		// Fast path only Ã¢â‚¬â€ no per-menu ResolveMenuItemLine (that made POS load 30s+)
 		// Menus with no linked lines/stock still appear; availability shows 0 / 86'd
 		if maxP < 0 {
 			maxP = 0
 		}
-		// No stock constraints + sellable price → show available (Nest price-only items)
+		// Nest: no stock lines + priced menu still listable; chips use maxPortions
 		if maxP == 0 && len(normLines) == 0 && m.price > 0 && m.available {
 			maxP = 999
 		}
@@ -576,7 +560,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				st := stockGet(stock, oid)
 				optionUnit := stockUnitFor(unitsByID, oid, firstNonEmpty(firstStr(om, "unit"), "pcs"))
 				needUnit := firstNonEmpty(firstStr(n, "unit"), "pcs")
-				optionPortions := portionNestParity(st, need, optionUnit, needUnit)
+				optionPortions := portionOne(st, need, optionUnit, needUnit)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": firstNonEmpty(firstStr(om, "finishedGoodName", "name"), oid),
@@ -594,7 +578,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				st := stockGet(stock, oid)
 				optionUnit := stockUnitFor(unitsByID, oid, "pcs")
 				needUnit := firstNonEmpty(firstStr(n, "unit"), "pcs")
-				optionPortions := portionNestParity(st, need, optionUnit, needUnit)
+				optionPortions := portionOne(st, need, optionUnit, needUnit)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": oid, "unit": optionUnit,

@@ -3,8 +3,6 @@ package menu
 import (
 	"math"
 	"strings"
-
-	"github.com/restflow/api-go/internal/units"
 )
 
 // MenuAvailabilityResult mirrors Nest listMenus availability fields.
@@ -29,6 +27,7 @@ func stockGet(stock map[string]float64, id string) float64 {
 	return 0
 }
 
+// stockUnitFor kept for normalizeMenuLines display only (not used in Nest portion math).
 func stockUnitFor(stockUnits map[string]string, id, fallback string) string {
 	if stockUnits != nil {
 		for key, unit := range stockUnits {
@@ -43,22 +42,13 @@ func stockUnitFor(stockUnits map[string]string, id, fallback string) string {
 	return "pcs"
 }
 
-// ComputeMenuAvailability — Nest MenuService.listMenus parity:
-//
-//	min over FIXED/INVENTORY lines of floor(available_stock / quantity_required)
-//	CHOICE/MULTI_CHOICE: floor(sum(option stocks) / quantity_required)
-//
-// Lines without a stock SKU are skipped (Nest continues; does not 86 the whole item).
+// ComputeMenuAvailability — Nest MenuService.listMenus parity (single source of truth).
 func ComputeMenuAvailability(
 	lines []map[string]interface{},
 	stock map[string]float64,
 	stockUnits ...map[string]string,
 ) MenuAvailabilityResult {
-	var unitsByID map[string]string
-	if len(stockUnits) > 0 {
-		unitsByID = stockUnits[0]
-	}
-	portions, _ := computePortions(lines, stock, unitsByID)
+	portions, _ := computePortions(lines, stock, nil)
 	if portions < 0 {
 		portions = 0
 	}
@@ -81,10 +71,15 @@ func hasStockConstraints(lines []map[string]interface{}) bool {
 	return false
 }
 
+// computePortions implements Nest listMenus exactly:
+//
+//	FIXED/INVENTORY: floor(available_stock / max(quantity_required, 0.0001))
+//	CHOICE/MULTI_CHOICE: floor(sum(option stocks) / need)
+//	maxPortions = min across lines; lines with no finished_good_id are skipped
 func computePortions(
 	lines []map[string]interface{},
 	stock map[string]float64,
-	stockUnits map[string]string,
+	_ map[string]string, // stockUnits ignored for Nest raw divide
 ) (int, string) {
 	if len(lines) == 0 {
 		return 0, ""
@@ -99,7 +94,6 @@ func computePortions(
 		}
 
 		componentType := strings.ToUpper(firstStr(line, "componentType", "component_type"))
-		// Nest: need = Math.max(quantityRequired || 1, 0.0001)
 		need := floatAny(line["quantityRequired"])
 		if need <= 0 {
 			need = floatAny(line["quantity_required"])
@@ -111,32 +105,40 @@ func computePortions(
 			need = 0.0001
 		}
 
-		needUnit := firstStr(line, "unit")
 		finishedGoodID := firstStr(
 			line,
 			"finishedGoodId", "finished_good_id",
 			"inventory_item_id", "inventoryItemId",
 		)
 
-		ids := collectLineIDs(line)
-
-		// Nest FIXED/INVENTORY: only the finished_good_id (not stale option_item_ids)
+		// Nest FIXED / INVENTORY path
 		if componentType == "FIXED" || componentType == "INVENTORY" || componentType == "" {
-			if finishedGoodID != "" {
-				ids = []string{finishedGoodID}
+			if finishedGoodID == "" {
+				// Nest: if (!finishedGoodId) continue;
+				continue
 			}
-		}
-
-		if len(ids) == 0 {
-			// Nest skips drafts with no finishedGoodId — does NOT zero the whole menu
+			if firstFG == "" {
+				firstFG = finishedGoodID
+			}
+			have := stockGet(stock, finishedGoodID)
+			p := int(math.Floor(have / need))
+			if p < 0 {
+				p = 0
+			}
+			if p < minPortions {
+				minPortions = p
+			}
 			continue
-		}
-		if firstFG == "" {
-			firstFG = ids[0]
 		}
 
 		if componentType == "CHOICE" || componentType == "MULTI_CHOICE" {
-			// Nest: floor(sum(option.availableStock) / need)
+			ids := collectLineIDs(line)
+			if len(ids) == 0 {
+				continue
+			}
+			if firstFG == "" {
+				firstFG = ids[0]
+			}
 			total := 0.0
 			for _, id := range ids {
 				total += stockGet(stock, id)
@@ -151,12 +153,16 @@ func computePortions(
 			continue
 		}
 
-		// FIXED / INVENTORY / default: Nest floor(snapshot.available / need)
-		// Prefer numeric Nest path; only convert when need unit is explicitly mass/volume.
-		for _, id := range ids {
-			have := stockGet(stock, id)
-			haveUnit := stockUnitFor(stockUnits, id, needUnit)
-			p := portionNestParity(have, need, haveUnit, needUnit)
+		// Unknown type with a SKU: treat like FIXED (Nest-safe)
+		if finishedGoodID != "" {
+			if firstFG == "" {
+				firstFG = finishedGoodID
+			}
+			have := stockGet(stock, finishedGoodID)
+			p := int(math.Floor(have / need))
+			if p < 0 {
+				p = 0
+			}
 			if p < minPortions {
 				minPortions = p
 			}
@@ -169,41 +175,22 @@ func computePortions(
 	return minPortions, firstFG
 }
 
-// portionNestParity matches Nest Math.floor(available / need) in the common case.
-// When recipe lines carry unit g/ml, convert stock into that unit first.
-func portionNestParity(have, need float64, haveUnit, needUnit string) int {
+// portionOne — Nest raw floor only (kept name for normalizeMenuLines callers).
+func portionOne(have, need float64, _, _ string) int {
 	if need <= 0 {
 		need = 1
+	}
+	if need < 0.0001 {
+		need = 0.0001
 	}
 	if have <= 0 {
 		return 0
 	}
-
-	nu := units.NormalizeUnit(needUnit)
-	switch nu {
-	case "g", "kg", "ml", "l":
-		haveBase, haveDim := units.ToBaseQuantity(have, firstNonEmpty(haveUnit, nu))
-		needBase, needDim := units.ToBaseQuantity(need, nu)
-		if haveDim != units.DimOther && needDim != units.DimOther && haveDim != needDim {
-			// Cannot convert — Nest would still divide raw numbers; use raw as fallback
-			return int(math.Floor(have / need))
-		}
-		if needBase <= 0 {
-			return 0
-		}
-		p := int(math.Floor(haveBase / needBase))
-		if p < 0 {
-			return 0
-		}
-		return p
-	default:
-		// Nest FIXED path: Math.floor(available / need) — no unit gate
-		p := int(math.Floor(have / need))
-		if p < 0 {
-			return 0
-		}
-		return p
+	p := int(math.Floor(have / need))
+	if p < 0 {
+		return 0
 	}
+	return p
 }
 
 func collectLineIDs(line map[string]interface{}) []string {
@@ -251,9 +238,4 @@ func collectLineIDs(line map[string]interface{}) []string {
 	}
 
 	return ids
-}
-
-// computePortions is used by list_menus portionsFromLines.
-func computePortionsExport(lines []map[string]interface{}, stock map[string]float64, stockUnits map[string]string) (int, string) {
-	return computePortions(lines, stock, stockUnits)
 }
