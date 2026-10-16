@@ -601,19 +601,3 @@ func nilIfEmpty(s string) interface{} {
 }
 
 
-// stockGet — case-insensitive projection lookup (working POS parity).
-func stockGet(stock map[string]float64, itemID string) float64 {
-	if itemID == "" || stock == nil {
-		return 0
-	}
-	if v, ok := stock[itemID]; ok {
-		return v
-	}
-	if v, ok := stock[strings.ToUpper(itemID)]; ok {
-		return v
-	}
-	if v, ok := stock[strings.ToLower(itemID)]; ok {
-		return v
-	}
-	return 0
-}
