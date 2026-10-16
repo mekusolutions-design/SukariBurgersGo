@@ -6,8 +6,10 @@ import (
 )
 
 // enrichLinesWithRecipeConstraints adds FIXED constraints from RecipeIngredient
-// so POS maxPortions matches Nest Menu (min over recipe limiting ingredients).
-// Keys tried: each line finished_good_id, menu id/code/name, root FG.
+// only when we have an explicit recipe key — never by fuzzy menu name.
+// Nest listMenus does NOT expand recipes for maxPortions; it mins FIXED lines.
+// We expand only CatalogMenuItem.recipe_id (and exact FG recipe keys) so
+// "Single Patty Cheese" is not forced onto the same recipe as "Single Patty".
 func (s *ResolutionService) enrichLinesWithRecipeConstraints(
 	ctx context.Context,
 	shopID string,
@@ -21,28 +23,28 @@ func (s *ResolutionService) enrichLinesWithRecipeConstraints(
 	out := make([]map[string]interface{}, len(lines))
 	copy(out, lines)
 
-	keys := make([]string, 0, 8)
+	keys := make([]string, 0, 4)
 	seenKey := map[string]bool{}
 	addKey := func(k string) {
 		k = strings.TrimSpace(k)
 		if k == "" || seenKey[k] {
 			return
 		}
+		// Never use display names as recipe keys (collapses all "Patty *" menus)
+		if strings.Contains(strings.ToLower(k), " ") {
+			return
+		}
 		seenKey[k] = true
 		keys = append(keys, k)
 	}
-	for _, lm := range lines {
-		addKey(firstStr(lm, "finishedGoodId", "finished_good_id", "inventory_item_id"))
-	}
-	addKey(rootFG)
+
+	// Explicit catalog recipe only (per menu item)
 	addKey(recipeID)
-	addKey(menuID)
-	addKey(code)
-	addKey(name)
-	// Strip MENU- prefix often used as commercial id
-	if strings.HasPrefix(strings.ToUpper(menuID), "MENU-") {
-		addKey(menuID[5:])
-	}
+
+	// Root FG / stock SKU if it is itself a recipe product (exact item_id / recipe_code)
+	addKey(rootFG)
+
+	// Do NOT add menuID/code/name — those cause every burger to share one recipe.
 
 	added := map[string]bool{}
 	for _, key := range keys {
@@ -57,15 +59,15 @@ func (s *ResolutionService) enrichLinesWithRecipeConstraints(
 			}
 			added[ck] = true
 			out = append(out, map[string]interface{}{
-				"componentType":    "FIXED",
-				"component_type":   "FIXED",
-				"componentKey":     ck,
-				"component_key":    ck,
-				"finishedGoodId":   d.ItemID,
-				"finished_good_id": d.ItemID,
-				"quantityRequired": d.Quantity,
+				"componentType":     "FIXED",
+				"component_type":    "FIXED",
+				"componentKey":      ck,
+				"component_key":     ck,
+				"finishedGoodId":    d.ItemID,
+				"finished_good_id":  d.ItemID,
+				"quantityRequired":  d.Quantity,
 				"quantity_required": d.Quantity,
-				"unit":             firstNonEmpty(d.Unit, "pcs"),
+				"unit":              firstNonEmpty(d.Unit, "pcs"),
 			})
 		}
 	}

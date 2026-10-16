@@ -133,41 +133,86 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			}
 		}
 
-		// Replace lines on create/adjust; append single component on item_added
-		appendLines := func(arr []interface{}) {
-			for _, e := range arr {
-				lm, _ := e.(map[string]interface{})
-				if lm == nil {
-					continue
+		// Nest parity: lines stored as Map by component_key
+		upsertLine := func(lm map[string]interface{}) {
+			if lm == nil {
+				return
+			}
+			key := firstStr(lm, "component_key", "componentKey")
+			if key == "" {
+				key = firstStr(lm, "finished_good_id", "finishedGoodId")
+			}
+			if key == "" {
+				key = "line_" + itoa(len(m.lines)+1)
+				lm["component_key"] = key
+				lm["componentKey"] = key
+			}
+			found := -1
+			for i, existing := range m.lines {
+				ek := firstStr(existing, "component_key", "componentKey")
+				if ek == "" {
+					ek = firstStr(existing, "finished_good_id", "finishedGoodId")
 				}
+				if ek == key {
+					found = i
+					break
+				}
+			}
+			if found >= 0 {
+				m.lines[found] = lm
+			} else {
 				m.lines = append(m.lines, lm)
 			}
 		}
 		etU := strings.ToUpper(et)
-		replaceLines := etU == "MENU_CREATED" || etU == "MENU_ITEM_CREATED" ||
-			etU == "MENU_UPDATED" || etU == "MENU_ADJUSTED" ||
-			et == "menu_created" || et == "menu_item_created" ||
-			et == "menu_updated" || et == "menu_adjusted"
-		if arr, ok := p["lines"].([]interface{}); ok && len(arr) > 0 {
-			if replaceLines {
+		// menu_adjusted replaces entire line set (Nest)
+		if etU == "MENU_ADJUSTED" || et == "menu_adjusted" {
+			if arr, ok := p["lines"].([]interface{}); ok {
 				m.lines = nil
+				for _, e := range arr {
+					if lm, ok := e.(map[string]interface{}); ok {
+						upsertLine(lm)
+					}
+				}
 			}
-			appendLines(arr)
-		}
-		if arr, ok := p["components"].([]interface{}); ok && len(arr) > 0 {
-			if replaceLines && len(m.lines) == 0 {
-				// components-only payload on adjust
-			}
-			if replaceLines && p["lines"] == nil {
+		} else if etU == "MENU_CREATED" || etU == "MENU_ITEM_CREATED" || et == "menu_created" || et == "menu_item_created" {
+			if arr, ok := p["lines"].([]interface{}); ok && len(arr) > 0 {
 				m.lines = nil
+				for _, e := range arr {
+					if lm, ok := e.(map[string]interface{}); ok {
+						upsertLine(lm)
+					}
+				}
+			} else if fg := firstStr(p, "finished_good_id", "finishedGoodId"); fg != "" {
+				upsertLine(map[string]interface{}{
+					"component_key": "main", "componentKey": "main",
+					"component_type": "FIXED", "componentType": "FIXED",
+					"finished_good_id": fg, "finishedGoodId": fg,
+					"quantity_required": floatAny(p["quantity_required"]),
+					"quantityRequired":  floatAny(p["quantityRequired"]),
+					"unit":              firstStr(p, "unit"),
+				})
 			}
-			appendLines(arr)
-		}
-		// Single component on menu_item_added
-		if et == "menu_item_added" || et == "MENU_ITEM_ADDED" {
+			if arr, ok := p["components"].([]interface{}); ok {
+				for _, e := range arr {
+					if lm, ok := e.(map[string]interface{}); ok {
+						upsertLine(lm)
+					}
+				}
+			}
+		} else if et == "menu_item_added" || et == "MENU_ITEM_ADDED" {
 			if firstStr(p, "component_key", "componentKey", "finished_good_id", "finishedGoodId") != "" ||
 				len(stringSliceAny(p["option_item_ids"])) > 0 {
-				m.lines = append(m.lines, p)
+				upsertLine(p)
+			}
+		} else if et == "menu_updated" || etU == "MENU_UPDATED" {
+			if arr, ok := p["lines"].([]interface{}); ok && len(arr) > 0 {
+				m.lines = nil
+				for _, e := range arr {
+					if lm, ok := e.(map[string]interface{}); ok {
+						upsertLine(lm)
+					}
+				}
 			}
 		}
 	}
