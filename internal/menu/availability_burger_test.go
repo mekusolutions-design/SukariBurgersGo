@@ -5,7 +5,6 @@ import "testing"
 // Mirrors the ops bug report: POS used to show lettuce (7) for every burger while
 // Menu correctly took min(lettuce, bacon, cheddar).
 func TestBurgerAvailabilityMinOverIngredients(t *testing.T) {
-	// Single Patty Cheese: lettuce 7/1, cheddar 6.5/43.48 → 0
 	linesCheese := []map[string]interface{}{
 		{"componentType": "FIXED", "finishedGoodId": "LETTUCE", "quantityRequired": 1.0},
 		{"componentType": "FIXED", "finishedGoodId": "CHEDDAR", "quantityRequired": 43.48},
@@ -16,7 +15,6 @@ func TestBurgerAvailabilityMinOverIngredients(t *testing.T) {
 		t.Fatalf("cheese burger expected 0 (86'd), got %d", r.MaxPortions)
 	}
 
-	// Single Patty Bacon: lettuce 7, bacon 82.5/30 → 2
 	linesBacon := []map[string]interface{}{
 		{"componentType": "FIXED", "finishedGoodId": "LETTUCE", "quantityRequired": 1.0},
 		{"componentType": "FIXED", "finishedGoodId": "BACON", "quantityRequired": 30.0},
@@ -26,7 +24,6 @@ func TestBurgerAvailabilityMinOverIngredients(t *testing.T) {
 		t.Fatalf("bacon burger expected 2, got %d", r2.MaxPortions)
 	}
 
-	// Single Patty: lettuce only → 7
 	linesPlain := []map[string]interface{}{
 		{"componentType": "FIXED", "finishedGoodId": "LETTUCE", "quantityRequired": 1.0},
 	}
@@ -45,5 +42,25 @@ func TestDoublePattyDoubleBaconPortions(t *testing.T) {
 	r := ComputeMenuAvailability(lines, stock)
 	if r.MaxPortions != 1 {
 		t.Fatalf("double bacon expected 1, got %d", r.MaxPortions)
+	}
+}
+
+// FIXED inventory item: quantity = floor(stock / need) — Menu truth for sellable qty.
+func TestFixedInventoryReflectsRealStock(t *testing.T) {
+	lines := []map[string]interface{}{
+		{"componentType": "FIXED", "finishedGoodId": "SODA-300", "quantityRequired": 1.0},
+	}
+	stock := map[string]float64{"SODA-300": 42}
+	r := ComputeMenuAvailability(lines, stock)
+	if r.MaxPortions != 42 {
+		t.Fatalf("FIXED soda expected 42 sellable, got %d", r.MaxPortions)
+	}
+	// need 2 per order
+	lines2 := []map[string]interface{}{
+		{"componentType": "INVENTORY", "finishedGoodId": "SODA-300", "quantityRequired": 2.0},
+	}
+	r2 := ComputeMenuAvailability(lines2, stock)
+	if r2.MaxPortions != 21 {
+		t.Fatalf("FIXED need=2 expected 21, got %d", r2.MaxPortions)
 	}
 }

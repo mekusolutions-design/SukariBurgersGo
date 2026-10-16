@@ -298,7 +298,8 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		srows.Close()
 	}
 
-	// Fallback: sum *usable* open batches (not past expiry) when projection is low/missing
+	// Fallback only when Menu/Nest projection has no row or zero — never inflate
+	// above available_stock (that made FIXED items "jump" on POS vs Menu).
 	brows, berr := s.pool.Query(ctx, `
 		SELECT item_id, COALESCE(SUM(qty_remaining), 0)
 		FROM "InventoryBatch"
@@ -311,7 +312,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			var qty float64
 			if brows.Scan(&id, &qty) == nil && id != "" {
 				cur := stockLookup(stock, id)
-				if qty > cur {
+				if cur <= 0 && qty > 0 {
 					stock[id] = qty
 					if u := strings.ToUpper(id); u != id {
 						if _, exists := stock[u]; !exists {

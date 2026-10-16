@@ -5,13 +5,15 @@ import (
 	"strings"
 )
 
-// enrichLinesWithRecipeConstraints adds FIXED constraints from RecipeIngredient
-// so POS maxPortions matches the Menu page: min over every recipe ingredient.
+// enrichLinesWithRecipeConstraints adds FIXED constraints from RecipeIngredient so
+// maxPortions = min over the real sellable BOM (same idea as the Menu page).
 //
-// Key order matters: resolve the *menu/burger recipe first* (recipeID, menu id/code/name,
-// root finished good). Only then expand per-line finished goods. Expanding lettuce FG
-// first used to attach a lettuce-only recipe and miss bacon/cheddar — POS then showed
-// lettuce stock (e.g. 7) for every burger.
+// Rules (Michael / ops):
+//   - POS must show the same sellable quantity as Menu — no separate POS math.
+//   - FIXED / stocked items (sodas, direct inventory): use the linked inventory
+//     quantity only. Do NOT attach a random recipe via display-name match.
+//   - Recipe / burger menus: expand the linked recipe (or root FG → recipe) and
+//     take min over every ingredient (bacon g, cheddar g, lettuce, …).
 func (s *ResolutionService) enrichLinesWithRecipeConstraints(
 	ctx context.Context,
 	shopID string,
@@ -36,12 +38,13 @@ func (s *ResolutionService) enrichLinesWithRecipeConstraints(
 		keys = append(keys, k)
 	}
 
-	// 1) Commercial / recipe identity first (burger BOM)
+	explicitRecipe := strings.TrimSpace(recipeID) != ""
+
+	// Always prefer explicit recipe id / commercial codes / root FG.
 	addKey(recipeID)
+	addKey(rootFG)
 	addKey(menuID)
 	addKey(code)
-	addKey(name)
-	addKey(rootFG)
 	if strings.HasPrefix(strings.ToUpper(menuID), "MENU-") && len(menuID) > 5 {
 		addKey(menuID[5:])
 	}
@@ -49,14 +52,22 @@ func (s *ResolutionService) enrichLinesWithRecipeConstraints(
 		addKey(code[5:])
 	}
 
-	// 2) Line-level FGs last (shared toppings / inventory links)
+	// Name + line FGs: safe because we only *apply* expansions with 2+ ingredients
+	// when recipeID is empty (standalone FIXED "Cheese" matching a 1-line recipe is skipped).
+	addKey(name)
 	for _, lm := range lines {
 		addKey(firstStr(lm, "finishedGoodId", "finished_good_id", "inventory_item_id", "inventoryItemId"))
 	}
+	_ = explicitRecipe // used below when filtering BOM size
 
 	added := map[string]bool{}
 	for _, key := range keys {
 		ded := s.cachedExpandRecipe(ctx, shopID, key, cache)
+		// Without an explicit recipe link, ignore 0–1 ingredient expansions
+		// (stocked FG or false-positive name/code match). Real burgers have a BOM.
+		if !explicitRecipe && len(ded) <= 1 {
+			continue
+		}
 		for _, d := range ded {
 			if d.ItemID == "" || d.Quantity <= 0 {
 				continue
