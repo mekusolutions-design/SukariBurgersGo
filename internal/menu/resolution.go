@@ -676,17 +676,39 @@ func (s *ResolutionService) recipeOutputItemID(ctx context.Context, recipeKey st
 }
 
 func (s *ResolutionService) expandRecipe(ctx context.Context, shopID, recipeKey string, qty float64) ([]StockDeduction, error) {
-	// recipeKey may be recipe.id or recipe_code
+	// recipeKey may be recipe.id, recipe_code, finished item_id, item_name, or RecipeOutput.item_id
+	key := strings.TrimSpace(recipeKey)
+	if key == "" {
+		return nil, nil
+	}
 	const rq = `
 		SELECT r.id, r.recipe_code
 		FROM "Recipe" r
-		WHERE r.is_active = true AND (r.id = $1 OR r.recipe_code = $1 OR r.item_id = $1)
+		WHERE r.is_active = true AND (
+			r.id = $1 OR r.recipe_code = $1 OR r.item_id = $1
+			OR UPPER(TRIM(r.item_name)) = UPPER(TRIM($1))
+			OR UPPER(TRIM(r.recipe_code)) = UPPER(TRIM($1))
+			OR UPPER(TRIM(r.item_id)) = UPPER(TRIM($1))
+		)
 		LIMIT 1
 	`
 	var recipeID, code string
-	err := s.pool.QueryRow(ctx, rq, recipeKey).Scan(&recipeID, &code)
+	err := s.pool.QueryRow(ctx, rq, key).Scan(&recipeID, &code)
 	if err != nil {
-		return nil, nil // not a recipe
+		// Finished-good output SKU → parent recipe (burger FG → full BOM)
+		const oq = `
+			SELECT r.id, r.recipe_code
+			FROM "RecipeOutput" ro
+			JOIN "Recipe" r ON r.id = ro.recipe_id
+			WHERE r.is_active = true AND (
+				ro.item_id = $1 OR UPPER(TRIM(ro.item_id)) = UPPER(TRIM($1))
+			)
+			LIMIT 1
+		`
+		err2 := s.pool.QueryRow(ctx, oq, key).Scan(&recipeID, &code)
+		if err2 != nil {
+			return nil, nil // not a recipe
+		}
 	}
 
 	const iq = `

@@ -6,10 +6,12 @@ import (
 )
 
 // enrichLinesWithRecipeConstraints adds FIXED constraints from RecipeIngredient
-// only when we have an explicit recipe key — never by fuzzy menu name.
-// Nest listMenus does NOT expand recipes for maxPortions; it mins FIXED lines.
-// We expand only CatalogMenuItem.recipe_id (and exact FG recipe keys) so
-// "Single Patty Cheese" is not forced onto the same recipe as "Single Patty".
+// so POS maxPortions matches the Menu page: min over every recipe ingredient.
+//
+// Key order matters: resolve the *menu/burger recipe first* (recipeID, menu id/code/name,
+// root finished good). Only then expand per-line finished goods. Expanding lettuce FG
+// first used to attach a lettuce-only recipe and miss bacon/cheddar — POS then showed
+// lettuce stock (e.g. 7) for every burger.
 func (s *ResolutionService) enrichLinesWithRecipeConstraints(
 	ctx context.Context,
 	shopID string,
@@ -23,28 +25,34 @@ func (s *ResolutionService) enrichLinesWithRecipeConstraints(
 	out := make([]map[string]interface{}, len(lines))
 	copy(out, lines)
 
-	keys := make([]string, 0, 4)
+	keys := make([]string, 0, 12)
 	seenKey := map[string]bool{}
 	addKey := func(k string) {
 		k = strings.TrimSpace(k)
-		if k == "" || seenKey[k] {
+		if k == "" || seenKey[strings.ToUpper(k)] {
 			return
 		}
-		// Never use display names as recipe keys (collapses all "Patty *" menus)
-		if strings.Contains(strings.ToLower(k), " ") {
-			return
-		}
-		seenKey[k] = true
+		seenKey[strings.ToUpper(k)] = true
 		keys = append(keys, k)
 	}
 
-	// Explicit catalog recipe only (per menu item)
+	// 1) Commercial / recipe identity first (burger BOM)
 	addKey(recipeID)
-
-	// Root FG / stock SKU if it is itself a recipe product (exact item_id / recipe_code)
+	addKey(menuID)
+	addKey(code)
+	addKey(name)
 	addKey(rootFG)
+	if strings.HasPrefix(strings.ToUpper(menuID), "MENU-") && len(menuID) > 5 {
+		addKey(menuID[5:])
+	}
+	if strings.HasPrefix(strings.ToUpper(code), "MENU-") && len(code) > 5 {
+		addKey(code[5:])
+	}
 
-	// Do NOT add menuID/code/name — those cause every burger to share one recipe.
+	// 2) Line-level FGs last (shared toppings / inventory links)
+	for _, lm := range lines {
+		addKey(firstStr(lm, "finishedGoodId", "finished_good_id", "inventory_item_id", "inventoryItemId"))
+	}
 
 	added := map[string]bool{}
 	for _, key := range keys {
@@ -53,7 +61,7 @@ func (s *ResolutionService) enrichLinesWithRecipeConstraints(
 			if d.ItemID == "" || d.Quantity <= 0 {
 				continue
 			}
-			ck := "recipe_" + d.ItemID
+			ck := "recipe_" + strings.ToUpper(strings.TrimSpace(d.ItemID))
 			if added[ck] {
 				continue
 			}
