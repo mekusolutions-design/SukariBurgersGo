@@ -132,7 +132,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			}
 		}
 
-		// Replace lines if menu_created brings full lines; append for item_added
+		// Replace lines on create/adjust; append single component on item_added
 		appendLines := func(arr []interface{}) {
 			for _, e := range arr {
 				lm, _ := e.(map[string]interface{})
@@ -142,17 +142,28 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				m.lines = append(m.lines, lm)
 			}
 		}
+		etU := strings.ToUpper(et)
+		replaceLines := etU == "MENU_CREATED" || etU == "MENU_ITEM_CREATED" ||
+			etU == "MENU_UPDATED" || etU == "MENU_ADJUSTED" ||
+			et == "menu_created" || et == "menu_item_created" ||
+			et == "menu_updated" || et == "menu_adjusted"
 		if arr, ok := p["lines"].([]interface{}); ok && len(arr) > 0 {
-			if et == "menu_created" || et == "MENU_CREATED" || et == "menu_item_created" {
+			if replaceLines {
 				m.lines = nil
 			}
 			appendLines(arr)
 		}
-		if arr, ok := p["components"].([]interface{}); ok {
+		if arr, ok := p["components"].([]interface{}); ok && len(arr) > 0 {
+			if replaceLines && len(m.lines) == 0 {
+				// components-only payload on adjust
+			}
+			if replaceLines && p["lines"] == nil {
+				m.lines = nil
+			}
 			appendLines(arr)
 		}
 		// Single component on menu_item_added
-		if et == "menu_item_added" {
+		if et == "menu_item_added" || et == "MENU_ITEM_ADDED" {
 			if firstStr(p, "component_key", "componentKey", "finished_good_id", "finishedGoodId") != "" ||
 				len(stringSliceAny(p["option_item_ids"])) > 0 {
 				m.lines = append(m.lines, p)
@@ -175,7 +186,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				WHERE shop_id = $1
 				  AND event_type IN (
 				    'menu_created','menu_item_added','menu_item_created','MENU_CREATED',
-				    'menu_updated','MENU_ITEM_ADDED'
+				    'menu_updated','MENU_ITEM_ADDED','menu_adjusted','MENU_ADJUSTED'
 				  )
 				ORDER BY created_at ASC
 				LIMIT 5000`, shopID)
@@ -186,7 +197,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				SELECT event_type, payload, created_at FROM "Event"
 				WHERE event_type IN (
 				    'menu_created','menu_item_added','menu_item_created','MENU_CREATED',
-				    'menu_updated','MENU_ITEM_ADDED'
+				    'menu_updated','MENU_ITEM_ADDED','menu_adjusted','MENU_ADJUSTED'
 				  )
 				ORDER BY created_at ASC
 				LIMIT 5000`)
@@ -399,6 +410,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				})
 			}
 		}
+		linesIn = dedupeComponentLines(linesIn)
 		normLines, reqSel := normalizeMenuLines(linesIn, stock)
 		maxP, fgID := portionsFromLines(normLines, stock)
 		if fgID == "" && m.finishedGoodID != "" {
@@ -409,8 +421,9 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if maxP < 0 {
 			maxP = 0
 		}
-		// Name-based stock: FIXED menu with no/mismatched finished_good_id (sodas/juices)
-		if maxP == 0 {
+		// Name-based stock ONLY when there are no component SKU constraints
+		// (sodas/juices). Never override multi-line recipe/burger min-portions.
+		if maxP == 0 && !hasStockConstraints(normLines) {
 			need := m.quantityRequired
 			if need <= 0 {
 				need = 1
@@ -607,103 +620,11 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 }
 
 func portionsFromLines(lines []map[string]interface{}, stock map[string]float64) (int, string) {
-	if len(lines) == 0 {
-		return 0, ""
-	}
-	maxP := 1 << 30
-	firstFG := ""
-	for _, lm := range lines {
-		ct := strings.ToUpper(firstStr(lm, "componentType", "component_type"))
-		need := floatAny(lm["quantityRequired"])
-		if need <= 0 {
-			need = floatAny(lm["quantity_required"])
-		}
-		if need <= 0 {
-			need = 1
-		}
-
-		fg := firstStr(lm, "finishedGoodId", "finished_good_id", "inventory_item_id", "inventoryItemId")
-		optIDs := stringSliceAny(lm["option_item_ids"])
-		optIDs = append(optIDs, stringSliceAny(lm["optionItemIds"])...)
-		if opts, ok := lm["options"].([]map[string]interface{}); ok {
-			for _, o := range opts {
-				if oid := firstStr(o, "finishedGoodId", "finished_good_id", "item_id", "itemId"); oid != "" {
-					optIDs = append(optIDs, oid)
-				}
-			}
-		}
-		if opts, ok := lm["options"].([]interface{}); ok {
-			for _, o := range opts {
-				if om, ok := o.(map[string]interface{}); ok {
-					if oid := firstStr(om, "finishedGoodId", "finished_good_id", "item_id", "itemId"); oid != "" {
-						optIDs = append(optIDs, oid)
-					}
-				}
-			}
-		}
-
-		// Nest parity:
-		// FIXED / INVENTORY → stock of finished_good_id only (not min of every option).
-		// CHOICE / MULTI_CHOICE → sum of option stocks / need.
-		// FIXED with only option_item_ids (inventory-select) → sum options (any usable SKU).
-		switch ct {
-		case "CHOICE", "MULTI_CHOICE":
-			ids := optIDs
-			if fg != "" {
-				ids = append([]string{fg}, ids...)
-			}
-			if len(ids) == 0 {
-				continue
-			}
-			if firstFG == "" {
-				firstFG = ids[0]
-			}
-			total := 0.0
-			for _, id := range ids {
-				total += stockLookup(stock, id)
-			}
-			p := int(total / need)
-			if p < maxP {
-				maxP = p
-			}
-		default: // FIXED, INVENTORY, empty
-			if fg != "" {
-				if firstFG == "" {
-					firstFG = fg
-				}
-				p := int(stockLookup(stock, fg) / need)
-				if p < maxP {
-					maxP = p
-				}
-				continue
-			}
-			// Inventory-select FIXED without finished_good_id: options only
-			if len(optIDs) == 0 {
-				continue
-			}
-			if firstFG == "" {
-				firstFG = optIDs[0]
-			}
-			total := 0.0
-			for _, id := range optIDs {
-				total += stockLookup(stock, id)
-			}
-			p := int(total / need)
-			if p < maxP {
-				maxP = p
-			}
-		}
-	}
-	if maxP == 1<<30 {
-		return 0, firstFG
-	}
-	if maxP < 0 {
-		maxP = 0
-	}
-	return maxP, firstFG
+	r := ComputeMenuAvailability(lines, stock)
+	return r.MaxPortions, r.FirstFG
 }
 
-// stockLookup resolves InventoryProjection qty with case-insensitive item_id fallback.
+
 func stockLookup(stock map[string]float64, itemID string) float64 {
 	if itemID == "" {
 		return 0
