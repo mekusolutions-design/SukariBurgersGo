@@ -26,6 +26,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		finishedGoodID               string
 		quantityRequired             float64
 		unit                         string
+		recipeID                     string
 	}
 	byID := map[string]*menuRow{}
 	order := []string{}
@@ -269,6 +270,12 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				m.finishedGoodID = sid
 			}
 		}
+		if c.RecipeID != nil {
+			rid := strings.TrimSpace(*c.RecipeID)
+			if rid != "" {
+				m.recipeID = rid
+			}
+		}
 	}
 
 	// stock map
@@ -347,6 +354,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		nrows.Close()
 	}
 
+	recipeCache := map[string][]StockDeduction{}
 	out := make([]map[string]interface{}, 0, len(order))
 	for _, id := range order {
 		m := byID[id]
@@ -411,6 +419,8 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			}
 		}
 		linesIn = dedupeComponentLines(linesIn)
+		// Nest/ops: also constrain by recipe ingredients (bacon g, cheddar g, …)
+		linesIn = s.enrichLinesWithRecipeConstraints(ctx, shopID, linesIn, m.menuID, m.code, m.name, m.finishedGoodID, m.recipeID, recipeCache)
 		normLines, reqSel := normalizeMenuLines(linesIn, stock)
 		maxP, fgID := portionsFromLines(normLines, stock)
 		if fgID == "" && m.finishedGoodID != "" {

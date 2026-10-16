@@ -107,3 +107,17 @@ func TestHasStockConstraints_BlocksNameFallback(t *testing.T) {
 		t.Fatal("empty should be false")
 	}
 }
+
+func TestOps_RecipeConstraints_MinAcrossIngredients(t *testing.T) {
+	// Simulates enrich output: base lines + recipe ingredients
+	lines := []map[string]interface{}{
+		{"componentType": "FIXED", "finishedGoodId": "LETTUCE", "quantityRequired": 1.0},
+		{"componentType": "FIXED", "finishedGoodId": "BACON", "quantityRequired": 30.0},
+		{"componentType": "FIXED", "finishedGoodId": "CHEDDAR", "quantityRequired": 43.48},
+	}
+	stock := map[string]float64{"LETTUCE": 7, "BACON": 82.5, "CHEDDAR": 6.5}
+	r := ComputeMenuAvailability(lines, stock)
+	if r.MaxPortions != 0 {
+		t.Fatalf("cheese-limited want 0, got %d", r.MaxPortions)
+	}
+}
