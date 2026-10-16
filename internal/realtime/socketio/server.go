@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
+	"github.com/restflow/api-go/internal/auth"
 )
 
 var upgrader = websocket.Upgrader{
@@ -29,7 +29,7 @@ var Namespaces = []string{
 }
 
 type Server struct {
-	mu sync.RWMutex
+	mu      sync.RWMutex
 	// key: namespace + "\x00" + shopID
 	rooms   map[string]map[*Conn]struct{}
 	log     *slog.Logger
@@ -365,6 +365,7 @@ func (c *Conn) emit(ns, event string, data interface{}) {
 	default:
 	}
 }
+
 
 func jsonString(s string) string {
 	b, _ := json.Marshal(s)

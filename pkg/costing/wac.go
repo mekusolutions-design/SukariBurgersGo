@@ -1,7 +1,7 @@
 package costing
 
 import (
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/pkg/money"
 	"github.com/shopspring/decimal"
 )
 

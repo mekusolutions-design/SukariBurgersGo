@@ -1,4 +1,4 @@
-module github.com/mekusolutions-design/SukariBurgersGo
+module github.com/restflow/api-go
 
 go 1.26.0
 

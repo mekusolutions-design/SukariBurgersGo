@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/kitchen"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/kitchen"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type KitchenHandler struct {

@@ -7,10 +7,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/locking"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/internal/locking"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type Service struct {
@@ -23,27 +23,27 @@ func NewService(pool *pgxpool.Pool, es *eventstore.Store) *Service {
 }
 
 type ReceiveInput struct {
-	ItemID           string
-	ItemName         string
-	Units            string
-	Category         string
-	Quantity         float64
+	ItemID         string
+	ItemName       string
+	Units          string
+	Category       string
+	Quantity       float64
 	QuantityApproved *float64 // if nil, use Quantity
-	UnitCost         float64
-	TotalCost        *float64
-	BatchNumber      string
-	ExpiryDate       *time.Time
-	DateReceived     string
-	SupplierName     string
-	SupplierNumber   string
-	SupplierID       string
-	ApprovedBy       string
-	Reference        string
-	WasteReason      string
-	WastePhotoURL    string
-	ShopID           string
-	ActorUserID      string
-	IdempotencyKey   string
+	UnitCost       float64
+	TotalCost      *float64
+	BatchNumber    string
+	ExpiryDate     *time.Time
+	DateReceived   string
+	SupplierName  string
+	SupplierNumber string
+	SupplierID     string
+	ApprovedBy     string
+	Reference      string
+	WasteReason    string
+	WastePhotoURL  string
+	ShopID         string
+	ActorUserID    string
+	IdempotencyKey string
 }
 
 type ReceiveResult struct {
@@ -179,6 +179,7 @@ func (s *Service) Receive(ctx context.Context, in ReceiveInput) (*ReceiveResult,
 		EventID: event.ID,
 	}, nil
 }
+
 
 func (s *Service) ListRecent(ctx context.Context, shopID string, limit int) ([]map[string]interface{}, error) {
 	if limit <= 0 {

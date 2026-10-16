@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/eventstore"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type PushProvider interface {
@@ -35,7 +35,7 @@ func (s *Service) SetPushProvider(p PushProvider) { s.push = p }
 
 type CreateInput struct {
 	ShopID, ActorUserID, UserID, Title, Body, IdempotencyKey string
-	Data                                                     map[string]interface{}
+	Data map[string]interface{}
 }
 
 func (s *Service) Create(ctx context.Context, in CreateInput) (map[string]interface{}, error) {

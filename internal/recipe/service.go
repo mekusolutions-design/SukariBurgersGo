@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type Service struct {
@@ -197,6 +197,7 @@ func (s *Service) Cost(ctx context.Context, recipeID string, batches float64) (f
 	return total, nil
 }
 
+
 func (s *Service) ListCategories(ctx context.Context, shopID string) ([]map[string]interface{}, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT DISTINCT COALESCE(category, 'uncategorized') AS category
@@ -271,6 +272,7 @@ func (s *Service) Availability(ctx context.Context, shopID, recipeID string) (ma
 		"recipeId": recipeID, "maxBatches": int(maxB), "available": maxB >= 1,
 	}, nil
 }
+
 
 func (s *Service) Update(ctx context.Context, id string, body map[string]interface{}) (map[string]interface{}, error) {
 	// Minimal field updates for Nest PUT /recipe/:id parity

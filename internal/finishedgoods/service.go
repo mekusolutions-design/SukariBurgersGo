@@ -6,9 +6,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type Service struct {

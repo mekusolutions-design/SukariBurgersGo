@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 func (s *Service) ExpiredCandidates(ctx context.Context, shopID string) ([]map[string]interface{}, error) {
@@ -168,8 +168,8 @@ func (s *Service) Events(ctx context.Context, shopID string, limit int, from, to
 			"id": id, "itemId": iid, "itemName": name, "quantity": q, "unit": unit,
 			"cause": cause, "value": val, "reportedBy": reported,
 			"moduleSource": asStrDefault(p["module_source"], "unknown"),
-			"createdAt":    created.UTC().Format(time.RFC3339),
-			"photoUrl":     photoURL, "notes": p["notes"],
+			"createdAt": created.UTC().Format(time.RFC3339),
+			"photoUrl": photoURL, "notes": p["notes"],
 			"batchNumber": nullEmpty(bn),
 		})
 	}

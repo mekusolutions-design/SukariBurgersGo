@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/eventstore"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 // CreateMenuInput matches Nest POST /menu multi-component body.

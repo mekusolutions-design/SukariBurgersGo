@@ -3,7 +3,7 @@ package unit_test
 import (
 	"testing"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
+	"github.com/restflow/api-go/internal/eventstore"
 )
 
 func TestPosSaleIsOnlyFinancialEvent(t *testing.T) {

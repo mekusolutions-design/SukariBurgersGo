@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/pkg/money"
 )
 
 // ExpiryHandler mirrors Nest jobs/expiry-sweep.processor.ts (idempotent).
@@ -131,7 +131,7 @@ func (h *ExpiryHandler) Run(ctx context.Context, job *Job, jobs *Store) error {
 					"unit_cost": uc, "total_cost": tc,
 					"source_event_id": id, "batch_number": bn,
 					"expiry_date": expiry.UTC().Format(time.RFC3339),
-					"shop_id":     shopID, "waste_reason": "expired",
+					"shop_id": shopID, "waste_reason": "expired",
 				},
 			})
 			if err != nil {

@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/pkg/money"
 )
 
 // Match Nest DEFAULT_REORDER_POINT when Item.reorder_point is unset.
@@ -23,25 +23,25 @@ func NewService(pool *pgxpool.Pool) *Service {
 }
 
 type StockRow struct {
-	ID                  string     `json:"id"`
-	ItemID              string     `json:"item_id"`
-	Name                string     `json:"name"`
-	Unit                string     `json:"unit"`
-	Category            string     `json:"category"`
-	ReorderPoint        float64    `json:"reorder_point"`
-	MinStock            float64    `json:"min_stock"`
-	AvailableStock      float64    `json:"available_stock"`
-	ExpiredStock        float64    `json:"expired_stock"`
-	DamagedStock        float64    `json:"damaged_stock"`
-	TotalValue          float64    `json:"total_value"`
-	AvgUnitCost         float64    `json:"avg_unit_cost"`
-	LastReceiptUnitCost *float64   `json:"last_receipt_unit_cost"`
-	CostMissing         bool       `json:"cost_missing"`
-	DaysToExpiryMin     *int       `json:"days_to_expiry_min"`
-	LastReceivedAt      *time.Time `json:"last_received_at"`
-	NextExpiryDate      *time.Time `json:"next_expiry_date"`
-	ShopID              string     `json:"shop_id"`
-	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
+	ID              string     `json:"id"`
+	ItemID          string     `json:"item_id"`
+	Name            string     `json:"name"`
+	Unit            string     `json:"unit"`
+	Category        string     `json:"category"`
+	ReorderPoint    float64    `json:"reorder_point"`
+	MinStock        float64    `json:"min_stock"`
+	AvailableStock  float64    `json:"available_stock"`
+	ExpiredStock    float64    `json:"expired_stock"`
+	DamagedStock         float64    `json:"damaged_stock"`
+	TotalValue           float64    `json:"total_value"`
+	AvgUnitCost          float64    `json:"avg_unit_cost"`
+	LastReceiptUnitCost  *float64   `json:"last_receipt_unit_cost"`
+	CostMissing          bool       `json:"cost_missing"`
+	DaysToExpiryMin      *int       `json:"days_to_expiry_min"`
+	LastReceivedAt  *time.Time `json:"last_received_at"`
+	NextExpiryDate  *time.Time `json:"next_expiry_date"`
+	ShopID          string     `json:"shop_id"`
+	UpdatedAt       *time.Time `json:"updated_at,omitempty"`
 }
 
 type PaginatedStock struct {

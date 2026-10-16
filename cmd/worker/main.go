@@ -10,11 +10,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/config"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/repository"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/worker"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/logging"
+	"github.com/restflow/api-go/internal/config"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/internal/repository"
+	"github.com/restflow/api-go/internal/worker"
+	"github.com/restflow/api-go/pkg/logging"
 )
 
 func main() {

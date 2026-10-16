@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/recipe"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/recipe"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type RecipeHandler struct {
@@ -49,15 +49,15 @@ func (h *RecipeHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rec, err := h.svc.Create(r.Context(), recipe.CreateInput{
-		RecipeCode:    mapString(m, "recipe_code", "recipeCode"),
-		ItemID:        mapString(m, "item_id", "itemId"),
-		ItemName:      mapString(m, "item_name", "itemName", "name"),
+		RecipeCode: mapString(m, "recipe_code", "recipeCode"),
+		ItemID: mapString(m, "item_id", "itemId"),
+		ItemName: mapString(m, "item_name", "itemName", "name"),
 		StandardYield: mapFloat(m, "standard_yield", "standardYield"),
-		Unit:          mapString(m, "unit"),
-		Notes:         mapString(m, "notes"),
-		Category:      mapString(m, "category"),
-		RecipeType:    mapString(m, "recipe_type", "recipeType"),
-		YieldBasis:    mapString(m, "yield_basis", "yieldBasis"),
+		Unit: mapString(m, "unit"),
+		Notes: mapString(m, "notes"),
+		Category: mapString(m, "category"),
+		RecipeType: mapString(m, "recipe_type", "recipeType"),
+		YieldBasis: mapString(m, "yield_basis", "yieldBasis"),
 	})
 	if err != nil {
 		apperrors.WriteJSON(w, r, err)

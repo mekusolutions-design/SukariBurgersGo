@@ -11,9 +11,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/locking"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/locking"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 var (
@@ -23,8 +23,8 @@ var (
 
 // Store is the Go event store. It preserves atomic append + projection semantics.
 type Store struct {
-	pool *pgxpool.Pool
-	log  *slog.Logger
+	pool   *pgxpool.Pool
+	log    *slog.Logger
 	// ProjectionRunner is called inside the same transaction after the event is written.
 	// It must be idempotent and transactional.
 	ProjectionRunner ProjectionRunner
@@ -477,3 +477,4 @@ func (s *Store) CountEvents(ctx context.Context, shopID string) (int64, error) {
 	}
 	return n, err
 }
+

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 // VerifyStripeSignature validates Stripe-Signature header against raw body.

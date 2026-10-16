@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type Service struct{ pool *pgxpool.Pool }
@@ -630,20 +630,20 @@ func eventTypeAliases(raw string) []string {
 		return nil
 	}
 	m := map[string][]string{
-		"received":               {"received", "RECEIVING", "goods_received"},
-		"receiving":              {"received", "RECEIVING", "goods_received"},
-		"waste":                  {"waste_recorded", "WASTE_RECORDED", "waste"},
-		"waste_recorded":         {"waste_recorded", "WASTE_RECORDED", "waste"},
-		"production_finished":    {"production_finished"},
-		"production_started":     {"production_started"},
-		"pos_sale":               {"pos_sale", "pos_order_created", "ORDER_PAID", "sale_completed"},
-		"sale":                   {"pos_sale", "pos_order_created", "ORDER_PAID", "sale_completed"},
-		"refill_issued":          {"refill_issued"},
-		"refill_requested":       {"refill_requested"},
+		"received":              {"received", "RECEIVING", "goods_received"},
+		"receiving":             {"received", "RECEIVING", "goods_received"},
+		"waste":                 {"waste_recorded", "WASTE_RECORDED", "waste"},
+		"waste_recorded":        {"waste_recorded", "WASTE_RECORDED", "waste"},
+		"production_finished":   {"production_finished"},
+		"production_started":    {"production_started"},
+		"pos_sale":              {"pos_sale", "pos_order_created", "ORDER_PAID", "sale_completed"},
+		"sale":                  {"pos_sale", "pos_order_created", "ORDER_PAID", "sale_completed"},
+		"refill_issued":         {"refill_issued"},
+		"refill_requested":      {"refill_requested"},
 		"finished_good_adjusted": {"finished_good_adjusted", "STOCK_ADJUSTMENT"},
-		"closing_stock_counted":  {"closing_stock_counted", "stock_count_completed"},
-		"stock_count":            {"closing_stock_counted", "stock_count_completed"},
-		"variance":               {"variance_batch", "variance_reason_submitted", "variance_flagged", "VARIANCE_WRITEOFF"},
+		"closing_stock_counted": {"closing_stock_counted", "stock_count_completed"},
+		"stock_count":           {"closing_stock_counted", "stock_count_completed"},
+		"variance":              {"variance_batch", "variance_reason_submitted", "variance_flagged", "VARIANCE_WRITEOFF"},
 	}
 	if a, ok := m[t]; ok {
 		return a

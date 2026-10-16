@@ -44,16 +44,10 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if p == nil {
 			return
 		}
-		// shop filter (payload or already scoped by query)
-		eventShop := strAny(p["shop_id"])
-		if eventShop == "" {
-			eventShop = strAny(p["shopId"])
-		}
-		if eventShop != "" && eventShop != shopID && !(shopID == "1" && eventShop == "") {
-			// allow missing shop in payload; only skip explicit mismatch
-			if eventShop != shopID {
-				return
-			}
+		// The SQL query is already shop-scoped. Payloads from legacy events may
+		// omit shop_id, but an explicit different shop must never be merged.
+		if !menuEventMatchesShop(p, shopID) {
+			return
 		}
 
 		menuID := firstStr(p, "menu_id", "menuId", "menu_item_id", "menuItemId")
@@ -203,11 +197,9 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		}
 	}
 
+	// Never fall back to an unscoped Event query: a shop with no menu events
+	// must not inherit another shop's menu. CatalogMenuItem remains shop-scoped.
 	loadEvents(true)
-	if len(order) == 0 {
-		// Fallback: Nest sometimes wrote events under another shop_id / default
-		loadEvents(false)
-	}
 
 	// ── CatalogMenuItem merge ─────────────────────────────
 	catalog, _ := s.ListCatalog(ctx, shopID)
@@ -232,7 +224,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		}
 	}
 
-	// stock map for portion calc (same as working RestFlowGo-pos-availability-parity)
+	// stock map
 	stock := map[string]float64{}
 	srows, _ := s.pool.Query(ctx, `SELECT item_id, COALESCE(available_stock,0) FROM "InventoryProjection" WHERE shop_id=$1`, shopID)
 	if srows != nil {
@@ -241,12 +233,6 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			var a float64
 			if srows.Scan(&id, &a) == nil {
 				stock[id] = a
-				// case-insensitive mirror
-				if u := strings.ToUpper(id); u != id {
-					if _, ok := stock[u]; !ok {
-						stock[u] = a
-					}
-				}
 			}
 		}
 		srows.Close()
@@ -269,45 +255,12 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		}
 		normLines, reqSel := normalizeMenuLines(m.lines, stock)
 		maxP, fgID := portionsFromLines(normLines, stock)
-
-		// --- RESTORED from working POS (RestFlowGo-pos-availability-parity) ---
-		// When component lines give 0, resolve sale path for real deductions
-		// (catalog stock_item_id / menu FG / option lines) and recompute portions.
-		if maxP == 0 {
-			if resolved, err := s.ResolveMenuItemLine(ctx, shopID, m.menuID, 1); err == nil && resolved != nil {
-				if len(resolved.Deductions) == 0 {
-					// resolvable with no stock move → treat as sellable
-					if m.price > 0 {
-						maxP = 999
-					}
-				} else {
-					rMax := 1 << 30
-					for _, d := range resolved.Deductions {
-						need := d.Quantity
-						if need <= 0 {
-							need = 0.0001
-						}
-						have := stockGet(stock, d.ItemID)
-						p := int(have / need)
-						if p < rMax {
-							rMax = p
-						}
-						if fgID == "" {
-							fgID = d.ItemID
-						}
-					}
-					if rMax == 1<<30 {
-						rMax = 0
-					}
-					maxP = rMax
-				}
-			}
-		}
-
+		// Fast path only — no per-menu ResolveMenuItemLine (that made POS load 30s+)
+		// Menus with no linked lines/stock still appear; availability shows 0 / 86'd
 		if maxP < 0 {
 			maxP = 0
 		}
-		// Sellable without stock linkage (price-only)
+		// Sellable without stock linkage (price-only): show as available for order UI
 		if maxP == 0 && len(normLines) == 0 && m.price > 0 {
 			maxP = 999
 		}
@@ -333,6 +286,20 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		out = []map[string]interface{}{}
 	}
 	return out, nil
+}
+
+// menuEventMatchesShop rejects explicit cross-shop payloads. Missing payload
+// scope is accepted only because callers obtain these rows from a shop-scoped
+// Event query; this helper must not be used with unscoped event results.
+func menuEventMatchesShop(payload map[string]interface{}, shopID string) bool {
+	if payload == nil || strings.TrimSpace(shopID) == "" {
+		return false
+	}
+	eventShop := strAny(payload["shop_id"])
+	if eventShop == "" {
+		eventShop = strAny(payload["shopId"])
+	}
+	return eventShop == "" || eventShop == shopID
 }
 
 func decodePayload(raw []byte) map[string]interface{} {
@@ -452,7 +419,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				if oid == "" {
 					continue
 				}
-				st := stockGet(stock, oid)
+				st := stock[oid]
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": firstNonEmpty(firstStr(om, "finishedGoodName", "name"), oid),
@@ -467,7 +434,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				if oid == "" {
 					continue
 				}
-				st := stockGet(stock, oid)
+				st := stock[oid]
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": oid, "unit": "pcs",
@@ -537,7 +504,7 @@ func portionsFromLines(lines []map[string]interface{}, stock map[string]float64)
 		if ct == "CHOICE" || ct == "MULTI_CHOICE" {
 			total := 0.0
 			for _, id := range ids {
-				total += stockGet(stock, id)
+				total += stock[id]
 			}
 			p := int(total / need)
 			if p < maxP {
@@ -546,7 +513,7 @@ func portionsFromLines(lines []map[string]interface{}, stock map[string]float64)
 			continue
 		}
 		for _, id := range ids {
-			p := int(stockGet(stock, id) / need)
+			p := int(stock[id] / need)
 			if p < maxP {
 				maxP = p
 			}
@@ -599,5 +566,3 @@ func nilIfEmpty(s string) interface{} {
 	}
 	return s
 }
-
-

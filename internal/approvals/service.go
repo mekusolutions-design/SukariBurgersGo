@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/eventstore"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 // Nest PENDING_EVENT_TYPES / APPROVAL_EVENT_TYPES
@@ -277,3 +277,4 @@ func (s *Service) Decide(ctx context.Context, shopID, approvalID, actorUserID, d
 		"success": true, "approvalId": approvalID, "decision": decision,
 	}, nil
 }
+

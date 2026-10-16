@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/realtime/socketio"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/realtime/socketio"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 // Nest Socket.IO namespaces we mirror as WS paths (and /ws?ns=).
@@ -36,7 +36,7 @@ type client struct {
 }
 
 type Hub struct {
-	mu sync.RWMutex
+	mu      sync.RWMutex
 	// key: namespace + ":" + shopID
 	rooms   map[string]map[*client]struct{}
 	log     *slog.Logger
@@ -308,7 +308,7 @@ func (h *Hub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	welcome, _ := json.Marshal(map[string]interface{}{
 		"event": "connected", "type": "connected",
 		"data": map[string]interface{}{
-			"message":   "RestFlow real-time connected",
+			"message": "RestFlow real-time connected",
 			"namespace": ns, "shopId": shopID,
 		},
 	})

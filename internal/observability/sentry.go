@@ -8,7 +8,7 @@ import (
 
 	"github.com/getsentry/sentry-go"
 	sentryhttp "github.com/getsentry/sentry-go/http"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/logging"
+	"github.com/restflow/api-go/pkg/logging"
 )
 
 // InitSentry configures Sentry when DSN is non-empty. Returns a flush function.

@@ -5,9 +5,9 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	pkgcosting "github.com/mekusolutions-design/SukariBurgersGo/pkg/costing"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	pkgcosting "github.com/restflow/api-go/pkg/costing"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type Service struct{ pool *pgxpool.Pool }

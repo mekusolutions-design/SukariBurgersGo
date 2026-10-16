@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type CatalogItem struct {
@@ -53,7 +53,7 @@ func (s *ResolutionService) ListCatalog(ctx context.Context, shopID string) ([]C
 
 type CreateCatalogInput struct {
 	ShopID, MenuItemID, Name, ProductionType, RecipeID, StockItemID string
-	SellingPrice                                                    float64
+	SellingPrice float64
 }
 
 func (s *ResolutionService) CreateCatalogItem(ctx context.Context, in CreateCatalogInput) (*CatalogItem, error) {
@@ -95,12 +95,12 @@ func (s *ResolutionService) CreateCatalogItem(ctx context.Context, in CreateCata
 }
 
 type ComboView struct {
-	ID           string           `json:"id"`
-	ComboID      string           `json:"combo_id"`
-	ShopID       string           `json:"shop_id"`
-	Name         string           `json:"name"`
-	SellingPrice float64          `json:"selling_price"`
-	Active       bool             `json:"active"`
+	ID           string  `json:"id"`
+	ComboID      string  `json:"combo_id"`
+	ShopID       string  `json:"shop_id"`
+	Name         string  `json:"name"`
+	SellingPrice float64 `json:"selling_price"`
+	Active       bool    `json:"active"`
 	Groups       []ComboGroupView `json:"groups"`
 }
 
@@ -155,8 +155,8 @@ func (s *ResolutionService) ListCombos(ctx context.Context, shopID string) ([]Co
 
 type CreateComboInput struct {
 	ShopID, ComboID, Name string
-	SellingPrice          float64
-	Groups                []ComboGroupView
+	SellingPrice float64
+	Groups []ComboGroupView
 }
 
 func (s *ResolutionService) CreateCombo(ctx context.Context, in CreateComboInput) (*ComboView, error) {

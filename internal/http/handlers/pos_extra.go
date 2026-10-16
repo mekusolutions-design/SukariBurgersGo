@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 func (h *POSHandler) SendToKitchen(w http.ResponseWriter, r *http.Request) {

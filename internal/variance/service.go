@@ -1,17 +1,17 @@
 package variance
 
 import (
+	"math"
 	"context"
 	"encoding/json"
 	"fmt"
-	"math"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 // isMaterialVariance implements Fix #5: round to 2dp; 0.00 is not a variance.
@@ -52,6 +52,7 @@ type Batch struct {
 	ProductionID  *string         `json:"production_id"`
 	CreatedAt     time.Time       `json:"created_at"`
 }
+
 
 // ListBatchesWeb returns Nest/web VarianceBatch shape from events (+ VarianceBatch table fallback).
 func (s *Service) ListBatches(ctx context.Context, shopID string, flaggedOnly bool, limit, offset int) ([]map[string]interface{}, int, error) {
@@ -173,7 +174,7 @@ func (s *Service) ListBatches(ctx context.Context, shopID string, flaggedOnly bo
 		all = append(all, map[string]interface{}{
 			"batchId": batchID, "batch_id": batchID,
 			"countedBy": countedBy, "countedAt": created.UTC().Format(time.RFC3339),
-			"status":       status,
+			"status": status,
 			"itemsCounted": itemsCounted, "itemsFlagged": itemsFlagged,
 			"totalVarianceValue": val, "flagged": flagged,
 			"source": et, "lines": lines,
@@ -241,7 +242,7 @@ func (s *Service) listFromTable(ctx context.Context, shopID string, flaggedOnly 
 		out = append(out, map[string]interface{}{
 			"batchId": batchID, "countedBy": "system",
 			"countedAt": created.UTC().Format(time.RFC3339),
-			"status":    status, "itemsCounted": 0, "itemsFlagged": 0,
+			"status": status, "itemsCounted": 0, "itemsFlagged": 0,
 			"totalVarianceValue": val, "flagged": flagged,
 			"productName": productName, "source": source, "lines": lineArr,
 		})
@@ -251,6 +252,7 @@ func (s *Service) listFromTable(ctx context.Context, shopID string, flaggedOnly 
 	}
 	return out, total, nil
 }
+
 
 func (s *Service) GetBatch(ctx context.Context, shopID, batchID string) (*Batch, error) {
 	const q = `SELECT id, batch_id, shop_id, product_item_id, product_name, source,

@@ -10,11 +10,11 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/fefo"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/realtime"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/costing"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/internal/fefo"
+	"github.com/restflow/api-go/internal/realtime"
+	"github.com/restflow/api-go/pkg/costing"
+	"github.com/restflow/api-go/pkg/money"
 	"github.com/shopspring/decimal"
 )
 
@@ -63,6 +63,7 @@ func (e *Engine) emitLowStock(shopID, itemID, itemName string, current, threshol
 	}
 	e.rt.BroadcastNamespace("inventory", shopID, "low_stock_alert", payload)
 }
+
 
 func (e *Engine) UpdateProjections(ctx context.Context, tx pgx.Tx, event *eventstore.Event) error {
 	var payload map[string]interface{}
@@ -654,6 +655,7 @@ func (e *Engine) handleProductionFinished(ctx context.Context, tx pgx.Tx, event 
 	// Single-output fallback (event-level item + cost_per_unit)
 	return e.handleStockIncrease(ctx, tx, event, payload, shopID)
 }
+
 
 // maybeSeedReorderPoint mirrors Nest: suggested = max(0.001, round(0.20 * approved, 3))
 // Only overwrites unset (0) or legacy default 10.

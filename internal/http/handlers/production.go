@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/production"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/production"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type ProductionHandler struct {
@@ -66,8 +66,8 @@ func (h *ProductionHandler) Finish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := production.FinishInput{
-		ShopID:       auth.ShopIDFromContext(r.Context()),
-		ActorUserID:  auth.UserIDFromContext(r.Context()),
+		ShopID:      auth.ShopIDFromContext(r.Context()),
+		ActorUserID: auth.UserIDFromContext(r.Context()),
 		ProductionID: firstString(req, "production_id", "productionId"),
 		RecipeID:     firstString(req, "recipe_id", "recipeId"),
 		ItemID:       firstString(req, "item_id", "itemId"),
@@ -164,14 +164,14 @@ func parseLines(raw interface{}) []production.Line {
 			continue
 		}
 		out = append(out, production.Line{
-			ItemID:           firstString(m, "item_id", "itemId"),
-			ItemName:         firstString(m, "item_name", "itemName"),
-			Unit:             firstString(m, "unit"),
-			ActualQuantity:   asFloat(m["actual_quantity"], asFloat(m["actualQuantity"], 0)),
-			StandardQuantity: asFloat(m["standard_quantity"], asFloat(m["standardQuantity"], 0)),
-			UnitCost:         asFloat(m["unit_cost"], asFloat(m["unitCost"], 0)),
-			UnitWeight:       asFloat(m["unit_weight"], asFloat(m["unitWeight"], 0)),
-			WeightUnit:       firstString(m, "weight_unit", "weightUnit"),
+			ItemID:            firstString(m, "item_id", "itemId"),
+			ItemName:          firstString(m, "item_name", "itemName"),
+			Unit:              firstString(m, "unit"),
+			ActualQuantity:    asFloat(m["actual_quantity"], asFloat(m["actualQuantity"], 0)),
+			StandardQuantity:  asFloat(m["standard_quantity"], asFloat(m["standardQuantity"], 0)),
+			UnitCost:          asFloat(m["unit_cost"], asFloat(m["unitCost"], 0)),
+			UnitWeight:        asFloat(m["unit_weight"], asFloat(m["unitWeight"], 0)),
+			WeightUnit:        firstString(m, "weight_unit", "weightUnit"),
 		})
 	}
 	return out

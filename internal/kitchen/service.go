@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/eventstore"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type Service struct {
@@ -97,13 +97,13 @@ func (s *Service) ActiveOrders(ctx context.Context, shopID string) ([]Order, err
 			if !ok {
 				o := &Order{
 					OrderID: oid, OrderId: oid, Items: items, OrderType: ot,
-					TableNumber:  firstAny(p["table_number"], p["tableNumber"]),
+					TableNumber: firstAny(p["table_number"], p["tableNumber"]),
 					CustomerName: firstAny(p["customer_name"], p["customerName"]),
-					Status:       ks, KitchenStatus: ks,
-					TotalAmount:   total,
+					Status: ks, KitchenStatus: ks,
+					TotalAmount: total,
 					PaymentMethod: firstAny(p["payment_method"], p["paymentMethod"]),
 					PaymentStatus: firstAny(p["payment_status"], p["paymentStatus"]),
-					Timestamp:     created, ShopID: shopID,
+					Timestamp: created, ShopID: shopID,
 				}
 				ordersMap[oid] = o
 			} else {

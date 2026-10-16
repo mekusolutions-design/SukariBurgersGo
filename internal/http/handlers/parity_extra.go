@@ -5,15 +5,15 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/consumption"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/costing"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/finishedgoods"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/kitchen"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/refill"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/trace"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/waste"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/consumption"
+	"github.com/restflow/api-go/internal/costing"
+	"github.com/restflow/api-go/internal/finishedgoods"
+	"github.com/restflow/api-go/internal/kitchen"
+	"github.com/restflow/api-go/internal/refill"
+	"github.com/restflow/api-go/internal/trace"
+	"github.com/restflow/api-go/internal/waste"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 // --- Consumption ---

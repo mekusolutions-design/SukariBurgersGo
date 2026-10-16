@@ -3,8 +3,8 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type UsersHandler struct {

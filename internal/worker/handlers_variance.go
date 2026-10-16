@@ -59,7 +59,7 @@ func (h *VarianceConsumptionHandler) Run(ctx context.Context, job *Job, jobs *St
 			return fmt.Errorf("list variance batches: %w", err)
 		}
 		type row struct {
-			id, batchID   string
+			id, batchID string
 			exp, act, val float64
 		}
 		var list []row

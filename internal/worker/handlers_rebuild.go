@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/projections"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/internal/projections"
 )
 
 // RebuildHandler implements strategy C: idempotent upsert replay (no truncate by default).

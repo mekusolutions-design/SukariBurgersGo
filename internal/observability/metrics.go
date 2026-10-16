@@ -45,10 +45,10 @@ var (
 )
 
 var (
-	uuidRe = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
-	hexRe  = regexp.MustCompile(`(?i)\b[0-9a-f]{16,}\b`)
-	numSeg = regexp.MustCompile(`/\d+(/|$)`)
-	prodID = regexp.MustCompile(`(?i)/PROD-[^/]+`)
+	uuidRe  = regexp.MustCompile(`(?i)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`)
+	hexRe   = regexp.MustCompile(`(?i)\b[0-9a-f]{16,}\b`)
+	numSeg  = regexp.MustCompile(`/\d+(/|$)`)
+	prodID  = regexp.MustCompile(`(?i)/PROD-[^/]+`)
 )
 
 // NormalizeRoute reduces cardinality for Prometheus labels.

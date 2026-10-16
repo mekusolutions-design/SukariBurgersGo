@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/payments"
+	"github.com/restflow/api-go/internal/payments"
 )
 
 func TestVerifyStripeSignatureValid(t *testing.T) {

@@ -3,7 +3,7 @@ package unit_test
 import (
 	"testing"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/pkg/money"
 )
 
 func TestMoneyRoundTrip(t *testing.T) {

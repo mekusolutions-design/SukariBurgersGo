@@ -1,12 +1,12 @@
 package payments
 
 import (
+	"github.com/restflow/api-go/pkg/money"
 	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
 	"io"
 	"net/http"
 	"strings"
@@ -14,9 +14,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/config"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/config"
+	"github.com/restflow/api-go/internal/eventstore"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 	"log/slog"
 )
 
@@ -50,7 +50,7 @@ func normalizePhone(phone string) string {
 
 type MpesaSTKInput struct {
 	ShopID, OrderID, Phone, ActorUserID, IdempotencyKey string
-	Amount                                              float64
+	Amount float64
 }
 
 func (s *Service) InitiateMpesaSTK(ctx context.Context, in MpesaSTKInput) (map[string]interface{}, error) {
@@ -334,6 +334,7 @@ func (s *Service) lookupStripeMeta(ctx context.Context, evt map[string]interface
 	// Best-effort: no hardcode to shop 1
 	return "", ""
 }
+
 
 // CreateStripePaymentIntent mirrors Nest payment.service createStripePaymentIntent.
 func (s *Service) CreateStripePaymentIntent(ctx context.Context, orderID string, amount float64, currency, shopID, actorUserID string) (map[string]interface{}, error) {

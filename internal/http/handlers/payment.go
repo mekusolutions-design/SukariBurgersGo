@@ -5,9 +5,9 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/payments"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/payments"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type PaymentHandler struct {
@@ -29,11 +29,11 @@ func (h *PaymentHandler) MpesaSTK(w http.ResponseWriter, r *http.Request) {
 		idem = mapString(m, "idempotency_key", "idempotencyKey")
 	}
 	result, err := h.svc.InitiateMpesaSTK(r.Context(), payments.MpesaSTKInput{
-		ShopID:         auth.ShopIDFromContext(r.Context()),
-		OrderID:        mapString(m, "order_id", "orderId"),
-		Phone:          mapString(m, "phone", "phoneNumber", "phone_number"),
-		Amount:         mapFloat(m, "amount"),
-		ActorUserID:    auth.UserIDFromContext(r.Context()),
+		ShopID: auth.ShopIDFromContext(r.Context()),
+		OrderID: mapString(m, "order_id", "orderId"),
+		Phone: mapString(m, "phone", "phoneNumber", "phone_number"),
+		Amount: mapFloat(m, "amount"),
+		ActorUserID: auth.UserIDFromContext(r.Context()),
 		IdempotencyKey: idem,
 	})
 	if err != nil {

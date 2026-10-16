@@ -7,8 +7,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 func (s *ResolutionService) ListCategories(ctx context.Context, shopID string) ([]map[string]interface{}, error) {
@@ -106,8 +106,8 @@ func (s *ResolutionService) ListFinishedGoodsForMenu(ctx context.Context, shopID
 		}
 		row := map[string]interface{}{
 			"item_id": id, "itemId": id,
-			"name":            name,
-			"unit":            unit,
+			"name": name,
+			"unit": unit,
 			"available_stock": stockVal, "availableStock": stockVal,
 			"total_value": v, "totalValue": v,
 		}

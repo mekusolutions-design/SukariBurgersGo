@@ -8,8 +8,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/config"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/config"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -243,10 +243,10 @@ func normalizeEmail(e string) string {
 type ctxKey string
 
 const (
-	CtxUserID ctxKey = "auth_user_id"
-	CtxRole   ctxKey = "auth_role"
-	CtxShopID ctxKey = "auth_shop_id"
-	CtxEmail  ctxKey = "auth_email"
+	CtxUserID  ctxKey = "auth_user_id"
+	CtxRole    ctxKey = "auth_role"
+	CtxShopID  ctxKey = "auth_shop_id"
+	CtxEmail   ctxKey = "auth_email"
 )
 
 func UserIDFromContext(ctx context.Context) string {

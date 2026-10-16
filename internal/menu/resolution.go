@@ -1,16 +1,16 @@
 package menu
 
 import (
+	"github.com/jackc/pgx/v5"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/jackc/pgx/v5"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type ProductionType string
@@ -25,16 +25,16 @@ const (
 // UnitCost = cost per Quantity unit for value (for FG: unit_weight × cost_per_yield_unit).
 // YieldQuantity = pieces × unit_weight (grams/ml) for Consumption page reporting.
 type StockDeduction struct {
-	ItemID        string  `json:"item_id"`
-	ItemName      string  `json:"item_name"`
-	Quantity      float64 `json:"quantity"`
-	Unit          string  `json:"unit"`
-	UnitCost      float64 `json:"unit_cost"`
-	Kind          string  `json:"kind,omitempty"`           // inventory | finished_good
-	UnitWeight    float64 `json:"unit_weight,omitempty"`    // per piece, in yield units
-	CostPerYield  float64 `json:"cost_per_yield,omitempty"` // batch_cost / standard_yield
-	YieldQuantity float64 `json:"yield_quantity,omitempty"` // pieces × unit_weight
-	LineCost      float64 `json:"line_cost,omitempty"`      // quantity × unit_cost
+	ItemID         string  `json:"item_id"`
+	ItemName       string  `json:"item_name"`
+	Quantity       float64 `json:"quantity"`
+	Unit           string  `json:"unit"`
+	UnitCost       float64 `json:"unit_cost"`
+	Kind           string  `json:"kind,omitempty"`             // inventory | finished_good
+	UnitWeight     float64 `json:"unit_weight,omitempty"`     // per piece, in yield units
+	CostPerYield   float64 `json:"cost_per_yield,omitempty"`  // batch_cost / standard_yield
+	YieldQuantity  float64 `json:"yield_quantity,omitempty"`  // pieces × unit_weight
+	LineCost       float64 `json:"line_cost,omitempty"`       // quantity × unit_cost
 }
 
 type ResolvedMenuItem struct {
@@ -123,11 +123,10 @@ func (s *ResolutionService) SetEventStore(es *eventstore.Store) {
 
 // ResolveMenuItemLine resolves a single menu item to stock deductions.
 // Matches Nest sellable-resolution:
-//
-//	CatalogMenuItem → recipe / stock_item
-//	else menu_created events → finished_good_id (or lines)
-//	else recipe by code / item_id
-//	else direct inventory SKU
+//   CatalogMenuItem → recipe / stock_item
+//   else menu_created events → finished_good_id (or lines)
+//   else recipe by code / item_id
+//   else direct inventory SKU
 func (s *ResolutionService) ResolveMenuItemLine(ctx context.Context, shopID, menuItemID string, qty float64) (*ResolvedMenuItem, error) {
 	if qty <= 0 {
 		return nil, apperrors.BadRequest("quantity must be positive")
@@ -680,17 +679,13 @@ func (s *ResolutionService) expandRecipe(ctx context.Context, shopID, recipeKey 
 	const rq = `
 		SELECT r.id, r.recipe_code
 		FROM "Recipe" r
-		WHERE r.is_active = true AND (
-			r.id = $1 OR r.recipe_code = $1 OR r.item_id = $1
-			OR UPPER(TRIM(r.recipe_code)) = UPPER(TRIM($1))
-			OR UPPER(TRIM(r.item_id)) = UPPER(TRIM($1))
-		)
+		WHERE r.is_active = true AND (r.id = $1 OR r.recipe_code = $1 OR r.item_id = $1)
 		LIMIT 1
 	`
 	var recipeID, code string
 	err := s.pool.QueryRow(ctx, rq, recipeKey).Scan(&recipeID, &code)
 	if err != nil {
-		return nil, nil // not a recipe — caller must pass real recipe_id
+		return nil, nil // not a recipe
 	}
 
 	const iq = `
@@ -924,6 +919,7 @@ func (s *ResolutionService) unitCost(ctx context.Context, shopID, itemID string)
 	return 0, name
 }
 
+
 // lookupMenuRecord returns name, price, and component lines from Nest menu events.
 func (s *ResolutionService) lookupMenuRecord(ctx context.Context, shopID, menuItemID string) (name string, price float64, lines []map[string]interface{}) {
 	rows, err := s.pool.Query(ctx, `
@@ -1069,6 +1065,7 @@ func (s *ResolutionService) deductionsFromMenuLines(
 	}
 	return out, anyRecipe, nil
 }
+
 
 func stringSliceFromLine(lm map[string]interface{}) []string {
 	out := []string{}

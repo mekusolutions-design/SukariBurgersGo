@@ -11,15 +11,15 @@ const (
 	TypeReportExport                 = "report_export"
 	TypeNightlyReconcileBackfill     = "nightly_reconcile_backfill"
 	TypeBulkRecomputeVarianceConsume = "bulk_recompute_variance_consumption"
-	TypeExpirySweep                  = "expiry_sweep"
+	TypeExpirySweep                   = "expiry_sweep"
 )
 
 const (
-	StatusQueued    = "queued"
-	StatusRunning   = "running"
-	StatusSucceeded = "succeeded"
-	StatusFailed    = "failed"
-	StatusCancelled = "cancelled"
+	StatusQueued     = "queued"
+	StatusRunning    = "running"
+	StatusSucceeded  = "succeeded"
+	StatusFailed     = "failed"
+	StatusCancelled  = "cancelled"
 )
 
 // Job is a durable background work unit.

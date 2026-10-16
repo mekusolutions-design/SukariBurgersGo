@@ -3,12 +3,12 @@ package router
 import (
 	"net/http"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/config"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/http/handlers"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/http/middleware"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/observability"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/realtime"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/config"
+	"github.com/restflow/api-go/internal/http/handlers"
+	"github.com/restflow/api-go/internal/http/middleware"
+	"github.com/restflow/api-go/internal/observability"
+	"github.com/restflow/api-go/internal/realtime"
 	"log/slog"
 )
 

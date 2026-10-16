@@ -3,7 +3,7 @@ package projections
 import (
 	"testing"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
+	"github.com/restflow/api-go/internal/eventstore"
 )
 
 func TestAppliesSaleSideEffects(t *testing.T) {

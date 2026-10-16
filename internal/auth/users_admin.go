@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type PublicUser struct {

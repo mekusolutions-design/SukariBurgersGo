@@ -2,16 +2,16 @@ package waste
 
 import (
 	"context"
+	"time"
 	"encoding/json"
 	"strings"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/costing"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/pkg/costing"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type Service struct {
@@ -25,7 +25,7 @@ func NewService(pool *pgxpool.Pool, es *eventstore.Store) *Service {
 
 type RecordInput struct {
 	ShopID, ActorUserID, ItemID, ItemName, BatchNumber, Unit, Reason, PhotoURL, IdempotencyKey string
-	Quantity, UnitCost                                                                         float64
+	Quantity, UnitCost float64
 }
 
 func (s *Service) Record(ctx context.Context, in RecordInput) (map[string]interface{}, error) {
@@ -89,7 +89,7 @@ func (s *Service) Record(ctx context.Context, in RecordInput) (map[string]interf
 		"quantity_wasted": in.Quantity, "quantity": in.Quantity,
 		"unit_of_measure": in.Unit, "unit": in.Unit,
 		"unit_cost": uc.Float64(), "total_waste_value": total.Float64(),
-		"total_cost":   total.Float64(),
+		"total_cost": total.Float64(),
 		"waste_reason": in.Reason, "batch_number": in.BatchNumber,
 		"shop_id": in.ShopID, "shopId": in.ShopID,
 		"recorded_at": time.Now().UTC().Format(time.RFC3339),
@@ -262,19 +262,19 @@ func (s *Service) Analytics(ctx context.Context, shopID string, from, to *time.T
 	}
 
 	return map[string]interface{}{
-		"shopId":                  shopID,
-		"totalWasteValue":         totalValue,
-		"totalWasteQuantity":      totalQty,
-		"totalWastedValue":        totalValue,
-		"totalWastedQuantity":     totalQty,
-		"wasteIncidents":          incidents,
+		"shopId":                 shopID,
+		"totalWasteValue":        totalValue,
+		"totalWasteQuantity":     totalQty,
+		"totalWastedValue":       totalValue,
+		"totalWastedQuantity":    totalQty,
+		"wasteIncidents":         incidents,
 		"wastePercentOfPurchases": nil,
-		"byCause":                 byCause,
-		"topItems":                topItems,
-		"total_waste_value":       totalValue,
-		"total_waste_quantity":    totalQty,
-		"top_waste_items":         topItems,
-		"by_waste_type":           byCauseValue,
+		"byCause":                byCause,
+		"topItems":               topItems,
+		"total_waste_value":      totalValue,
+		"total_waste_quantity":   totalQty,
+		"top_waste_items":        topItems,
+		"by_waste_type":          byCauseValue,
 	}, nil
 }
 

@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/pkg/money"
 )
 
 // Canonical categories — same list as Nest INGREDIENT_CATEGORIES / inventory-categories.
@@ -180,7 +180,7 @@ func (s *Service) batchesFromEvents(ctx context.Context, shopID, itemID string) 
 		out = append(out, map[string]interface{}{
 			"batchNumber": bn, "batch_number": bn,
 			"itemId": itemID, "item_id": itemID,
-			"quantity":   qty,
+			"quantity": qty,
 			"expiryDate": expStr, "expiry_date": expStr,
 			"receivedAt": createdStr, "created_at": createdStr,
 			"event_type": et,
@@ -208,11 +208,11 @@ func RowToAPI(r StockRow) map[string]interface{} {
 		lastRecv = r.LastReceivedAt.UTC().Format(time.RFC3339)
 	}
 	return map[string]interface{}{
-		"id":      r.ID,
+		"id": r.ID,
 		"item_id": r.ItemID, "itemId": r.ItemID,
-		"name":          r.Name,
-		"unit":          r.Unit,
-		"category":      r.Category,
+		"name": r.Name,
+		"unit": r.Unit,
+		"category": r.Category,
 		"reorder_point": r.ReorderPoint, "reorderPoint": r.ReorderPoint,
 		"min_stock": r.MinStock, "minStock": r.MinStock,
 		"available_stock": r.AvailableStock, "availableStock": r.AvailableStock,

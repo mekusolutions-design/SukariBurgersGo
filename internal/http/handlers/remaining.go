@@ -5,14 +5,14 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/approvals"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/dashboard"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/menu"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/notifications"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/sync"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/variance"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/approvals"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/dashboard"
+	"github.com/restflow/api-go/internal/menu"
+	"github.com/restflow/api-go/internal/notifications"
+	"github.com/restflow/api-go/internal/sync"
+	"github.com/restflow/api-go/internal/variance"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 // --- Variance ---
@@ -83,9 +83,7 @@ func (h *VarianceHandler) Reason(w http.ResponseWriter, r *http.Request) {
 // --- Approvals ---
 type ApprovalsHandler struct{ svc *approvals.Service }
 
-func NewApprovalsHandler(svc *approvals.Service) *ApprovalsHandler {
-	return &ApprovalsHandler{svc: svc}
-}
+func NewApprovalsHandler(svc *approvals.Service) *ApprovalsHandler { return &ApprovalsHandler{svc: svc} }
 
 func (h *ApprovalsHandler) Pending(w http.ResponseWriter, r *http.Request) {
 	items, err := h.svc.Pending(r.Context(), auth.ShopIDFromContext(r.Context()))
@@ -106,9 +104,7 @@ func (h *ApprovalsHandler) History(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ApprovalsHandler) Approve(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Notes string `json:"notes"`
-	}
+	var req struct{ Notes string `json:"notes"` }
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	result, err := h.svc.Decide(r.Context(), auth.ShopIDFromContext(r.Context()), r.PathValue("approvalId"), auth.UserIDFromContext(r.Context()), "approve", req.Notes)
 	if err != nil {
@@ -119,9 +115,7 @@ func (h *ApprovalsHandler) Approve(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *ApprovalsHandler) Reject(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Notes string `json:"notes"`
-	}
+	var req struct{ Notes string `json:"notes"` }
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	result, err := h.svc.Decide(r.Context(), auth.ShopIDFromContext(r.Context()), r.PathValue("approvalId"), auth.UserIDFromContext(r.Context()), "reject", req.Notes)
 	if err != nil {
@@ -155,9 +149,7 @@ func (h *SyncHandler) Bulk(w http.ResponseWriter, r *http.Request) {
 // --- Dashboard ---
 type DashboardHandler struct{ svc *dashboard.Service }
 
-func NewDashboardHandler(svc *dashboard.Service) *DashboardHandler {
-	return &DashboardHandler{svc: svc}
-}
+func NewDashboardHandler(svc *dashboard.Service) *DashboardHandler { return &DashboardHandler{svc: svc} }
 
 func (h *DashboardHandler) Summary(w http.ResponseWriter, r *http.Request) {
 	from, to := parseDateRange(r)
@@ -216,9 +208,9 @@ func (h *NotificationsHandler) Create(w http.ResponseWriter, r *http.Request) {
 	result, err := h.svc.Create(r.Context(), notifications.CreateInput{
 		ShopID: auth.ShopIDFromContext(r.Context()), ActorUserID: auth.UserIDFromContext(r.Context()),
 		UserID: mapString(m, "user_id", "userId"),
-		Title:  mapString(m, "title"),
-		Body:   mapString(m, "body", "message"),
-		Data:   data, IdempotencyKey: idem,
+		Title: mapString(m, "title"),
+		Body: mapString(m, "body", "message"),
+		Data: data, IdempotencyKey: idem,
 	})
 	if err != nil {
 		apperrors.WriteJSON(w, r, err)
@@ -282,8 +274,8 @@ func (h *MenuHandler) CreateCombo(w http.ResponseWriter, r *http.Request) {
 
 func (h *MenuHandler) PreviewCombo(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ComboID    string                     `json:"combo_id"`
-		Quantity   float64                    `json:"quantity"`
+		ComboID    string                   `json:"combo_id"`
+		Quantity   float64                  `json:"quantity"`
 		Selections []menu.ComboSelectionInput `json:"combo_selections"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -300,6 +292,7 @@ func (h *MenuHandler) PreviewCombo(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, resolved)
 }
+
 
 func (h *DashboardHandler) RebuildSales(w http.ResponseWriter, r *http.Request) {
 	shopID := auth.ShopIDFromContext(r.Context())

@@ -3,7 +3,7 @@ package unit_test
 import (
 	"testing"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/menu"
+	"github.com/restflow/api-go/internal/menu"
 )
 
 func TestAggregateDeductions(t *testing.T) {

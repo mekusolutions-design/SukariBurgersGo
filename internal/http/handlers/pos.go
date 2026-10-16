@@ -4,12 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
-	"strings"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/menu"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/pos"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/menu"
+	"github.com/restflow/api-go/internal/pos"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type POSHandler struct {
@@ -170,46 +169,50 @@ func (h *POSHandler) CreateOrder(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *POSHandler) ListOrders(w http.ResponseWriter, r *http.Request) {
+	// Match Nest's @CurrentShop behavior: query parameters are hints only and
+	// must never replace the authenticated tenant scope.
 	shopID := auth.ShopIDFromContext(r.Context())
-	if qs := strings.TrimSpace(r.URL.Query().Get("shopId")); qs != "" {
-		shopID = qs
-	} else if qs := strings.TrimSpace(r.URL.Query().Get("shop_id")); qs != "" {
-		shopID = qs
-	}
 	q := r.URL.Query()
-	limit, _ := strconv.Atoi(q.Get("limit"))
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	limit, _ := strconv.Atoi(q.Get("pageSize"))
 	if limit <= 0 {
-		limit, _ = strconv.Atoi(q.Get("pageSize"))
+		limit, _ = strconv.Atoi(q.Get("limit"))
 	}
-	offset, _ := strconv.Atoi(q.Get("offset"))
-	if page, _ := strconv.Atoi(q.Get("page")); page > 1 {
-		if limit <= 0 {
-			limit = 25
-		}
-		offset = (page - 1) * limit
+	if limit <= 0 {
+		limit = 25
 	}
-	orders, err := h.svc.ListOrders(r.Context(), shopID, limit, offset)
+	if limit > 100 {
+		limit = 100
+	}
+	offset := (page - 1) * limit
+	orders, total, err := h.svc.ListOrders(r.Context(), shopID, limit, offset)
 	if err != nil {
-		apperrors.WriteJSON(w, r, apperrors.Internal("failed to list orders: "+err.Error()))
+		if ae, ok := err.(*apperrors.AppError); ok {
+			apperrors.WriteJSON(w, r, ae)
+		} else {
+			apperrors.WriteJSON(w, r, apperrors.Internal("failed to list orders"))
+		}
 		return
 	}
+	totalPages := (total + limit - 1) / limit
+	if totalPages < 1 {
+		totalPages = 1
+	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"items":    orders,
-		"total":    len(orders),
-		"page":     q.Get("page"),
-		"pageSize": limit,
+		"items": orders, "total": total, "page": page,
+		"pageSize": limit, "totalPages": totalPages,
 	})
 }
 
 func (h *POSHandler) MenuAvailability(w http.ResponseWriter, r *http.Request) {
+	// Nest scopes this route from the authenticated principal, not shopId query.
 	shopID := auth.ShopIDFromContext(r.Context())
-	if q := strings.TrimSpace(r.URL.Query().Get("shopId")); q != "" {
-		shopID = q
-	} else if q := strings.TrimSpace(r.URL.Query().Get("shop_id")); q != "" {
-		shopID = q
-	}
 	if shopID == "" {
-		shopID = "1"
+		apperrors.WriteJSON(w, r, apperrors.Forbidden("shop identity required"))
+		return
 	}
 	items, err := h.svc.ListMenuAvailability(r.Context(), shopID)
 	if err != nil {
@@ -224,12 +227,12 @@ func (h *POSHandler) MenuAvailability(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *POSHandler) Bootstrap(w http.ResponseWriter, r *http.Request) {
-	shopID := r.URL.Query().Get("shopId")
+	// Nest's @CurrentShop scope is authoritative; never accept a tenant override
+	// from query parameters on the POS bootstrap endpoint.
+	shopID := auth.ShopIDFromContext(r.Context())
 	if shopID == "" {
-		shopID = r.URL.Query().Get("shop_id")
-	}
-	if shopID == "" {
-		shopID = auth.ShopIDFromContext(r.Context())
+		apperrors.WriteJSON(w, r, apperrors.Forbidden("shop identity required"))
+		return
 	}
 	out, err := h.svc.Bootstrap(r.Context(), shopID)
 	if err != nil {

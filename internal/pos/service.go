@@ -5,15 +5,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/menu"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/internal/menu"
+	apperrors "github.com/restflow/api-go/pkg/errors"
+	"github.com/restflow/api-go/pkg/money"
 )
 
 type Service struct {
@@ -78,17 +79,28 @@ func (s *Service) CreateOrder(ctx context.Context, in CreateOrderInput) (*Create
 	if len(in.Items) == 0 {
 		return nil, apperrors.BadRequest("At least one item is required")
 	}
+	// Keep transport validation aligned with Nest CreateOrderSchema before any
+	// inventory resolution or event write.
+	if err := validateCreateOrderInput(in); err != nil {
+		return nil, err
+	}
 	// Client total_amount is ignored for financial records; server computes from lines.
 
 	orderID := fmt.Sprintf("ORD-%s", strings.ReplaceAll(uuid.New().String(), "-", "")[:16])
 	idemKey := fmt.Sprintf("pos-order-%s", orderID)
-	if len(in.ClientIdempotencyKey) >= 8 {
-		idemKey = fmt.Sprintf("pos-order-client-%s", strings.TrimSpace(in.ClientIdempotencyKey))
+	clientKey := strings.TrimSpace(in.ClientIdempotencyKey)
+	if len(clientKey) >= 8 {
+		idemKey = fmt.Sprintf("pos-order-client-%s", clientKey)
 	}
 
 	// Idempotency fast-path
 	existing, err := s.eventStore.FindByIdempotencyKey(ctx, idemKey)
 	if err == nil && existing != nil {
+		// Event.idempotency_key is globally unique in the shared schema. Never
+		// replay another shop's order to a caller that reused the same key.
+		if existing.ShopID != shopID {
+			return nil, apperrors.Conflict("Idempotency key already used by another shop")
+		}
 		return &CreateOrderResult{
 			Success: true,
 			OrderID: orderIDFromPayload(existing),
@@ -122,9 +134,8 @@ func (s *Service) CreateOrder(ctx context.Context, in CreateOrderInput) (*Create
 		LineTotal       float64                    `json:"line_total"`
 		FoodCost        float64                    `json:"food_cost"`
 		StockDeductions []menu.StockDeduction      `json:"stock_deductions"`
-		Selections              []menu.ResolvedMenuItem    `json:"selections,omitempty"`
-		ComboSelections         []menu.ComboSelectionInput `json:"combo_selections,omitempty"`
-		ComboSelectionsEnriched []map[string]interface{}   `json:"-"`
+		Selections      []menu.ResolvedMenuItem    `json:"selections,omitempty"`
+		ComboSelections []menu.ComboSelectionInput `json:"combo_selections,omitempty"`
 	}
 
 	var enriched []enrichedLine
@@ -157,50 +168,11 @@ func (s *Service) CreateOrder(ctx context.Context, in CreateOrderInput) (*Create
 			if qty > 0 {
 				unitPrice = resolved.Revenue / qty
 			}
-			// Nest parity: ticket-friendly combo_selections with menu_item_names + group_name
-			comboSelOut := make([]map[string]interface{}, 0, len(line.ComboSelections))
-			for _, cs := range line.ComboSelections {
-				names := make([]string, 0, len(cs.MenuItemIDs))
-				var groupName string
-				for _, id := range cs.MenuItemIDs {
-					nm := id
-					for _, mi := range resolved.MenuItems {
-						if mi.MenuItemID == id {
-							if mi.Name != "" {
-								nm = mi.Name
-							}
-							if mi.GroupName != "" {
-								groupName = mi.GroupName
-							}
-							if mi.GroupIndex != nil && *mi.GroupIndex == cs.GroupIndex && mi.GroupName != "" {
-								groupName = mi.GroupName
-							}
-							break
-						}
-					}
-					names = append(names, nm)
-				}
-				if groupName == "" {
-					for _, mi := range resolved.MenuItems {
-						if mi.GroupIndex != nil && *mi.GroupIndex == cs.GroupIndex && mi.GroupName != "" {
-							groupName = mi.GroupName
-							break
-						}
-					}
-				}
-				comboSelOut = append(comboSelOut, map[string]interface{}{
-					"group_index":     cs.GroupIndex,
-					"group_name":      groupName,
-					"menu_item_ids":   cs.MenuItemIDs,
-					"menu_item_names": names,
-				})
-			}
 			el := enrichedLine{
 				LineType: "combo", ComboID: line.ComboID, Name: resolved.Label,
 				Quantity: qty, UnitPrice: unitPrice, LineTotal: unitPrice * qty,
 				FoodCost: foodCost, StockDeductions: resolved.StockDeductions,
 				Selections: resolved.MenuItems, ComboSelections: line.ComboSelections,
-				ComboSelectionsEnriched: comboSelOut,
 			}
 			enriched = append(enriched, el)
 			allDeductions = append(allDeductions, resolved.StockDeductions...)
@@ -296,22 +268,11 @@ func (s *Service) CreateOrder(ctx context.Context, in CreateOrderInput) (*Create
 		}
 		if e.MenuItemID != "" {
 			item["menu_item_id"] = e.MenuItemID
-			item["menu_id"] = e.MenuItemID
-			item["item_id"] = e.MenuItemID
-			item["selling_price"] = e.UnitPrice
 		}
 		if e.ComboID != "" {
 			item["combo_id"] = e.ComboID
-			item["menu_id"] = e.ComboID
-			item["item_id"] = e.ComboID
-			if len(e.ComboSelectionsEnriched) > 0 {
-				item["combo_selections"] = e.ComboSelectionsEnriched
-			} else {
-				item["combo_selections"] = e.ComboSelections
-			}
+			item["combo_selections"] = e.ComboSelections
 			item["selections"] = e.Selections
-			item["resolved_menu_items"] = e.Selections
-			item["selling_price"] = e.UnitPrice
 		}
 		itemsPayload = append(itemsPayload, item)
 	}
@@ -373,6 +334,70 @@ func (s *Service) CreateOrder(ctx context.Context, in CreateOrderInput) (*Create
 	}, nil
 }
 
+// validateCreateOrderInput mirrors the Nest POS DTO's finite enums and
+// integer quantity contract. It deliberately does not recalculate tax/discount
+// policy, which must remain governed by the established POS contract.
+func validateCreateOrderInput(in CreateOrderInput) error {
+	orderType := strings.ReplaceAll(strings.TrimSpace(in.OrderType), "-", "_")
+	if orderType == "" {
+		orderType = "dine_in"
+	}
+	switch orderType {
+	case "dine_in", "takeaway", "delivery", "pickup":
+	default:
+		return apperrors.BadRequest("Invalid order_type")
+	}
+
+	paymentMethod := strings.ToLower(strings.TrimSpace(in.PaymentMethod))
+	if paymentMethod == "" {
+		paymentMethod = "cash"
+	}
+	switch paymentMethod {
+	case "cash", "mpesa", "card", "split":
+	default:
+		return apperrors.BadRequest("Invalid payment_method")
+	}
+
+	paymentStatus := strings.ToLower(strings.TrimSpace(in.PaymentStatus))
+	if paymentStatus == "" {
+		paymentStatus = "paid"
+	}
+	switch paymentStatus {
+	case "paid", "pending", "failed", "unpaid":
+	default:
+		return apperrors.BadRequest("Invalid payment_status")
+	}
+
+	for i, line := range in.Items {
+		if line.Quantity <= 0 || math.IsNaN(line.Quantity) || math.IsInf(line.Quantity, 0) || math.Trunc(line.Quantity) != line.Quantity {
+			return apperrors.BadRequest(fmt.Sprintf("items[%d].quantity must be a positive integer", i))
+		}
+		lineType := strings.TrimSpace(line.LineType)
+		if lineType == "" {
+			lineType = "menu_item"
+		}
+		if lineType != "menu_item" && lineType != "combo" {
+			return apperrors.BadRequest(fmt.Sprintf("items[%d].line_type is invalid", i))
+		}
+	}
+
+	if paymentMethod == "split" {
+		if len(in.PaymentSplits) < 2 {
+			return apperrors.BadRequest("Split payment requires at least two payment lines")
+		}
+		for i, split := range in.PaymentSplits {
+			method := strings.ToLower(strings.TrimSpace(split.Method))
+			if method != "cash" && method != "mpesa" && method != "card" {
+				return apperrors.BadRequest(fmt.Sprintf("payment_splits[%d].method is invalid", i))
+			}
+			if split.Amount <= 0 || math.IsNaN(split.Amount) || math.IsInf(split.Amount, 0) {
+				return apperrors.BadRequest(fmt.Sprintf("payment_splits[%d].amount must be positive", i))
+			}
+		}
+	}
+	return nil
+}
+
 func nullIfEmpty(s string) interface{} {
 	if s == "" {
 		return nil
@@ -400,12 +425,12 @@ func orderIDFromPayload(e *eventstore.Event) string {
 }
 
 // ListOrders returns recent pos_sale events for a shop.
-func (s *Service) ListOrders(ctx context.Context, shopID string, limit, offset int) ([]map[string]interface{}, error) {
+func (s *Service) ListOrders(ctx context.Context, shopID string, limit, offset int) ([]map[string]interface{}, int, error) {
 	if shopID == "" {
-		shopID = "1"
+		return nil, 0, apperrors.Forbidden("shop identity required")
 	}
 	if limit <= 0 || limit > 100 {
-		limit = 20
+		limit = 25
 	}
 	if offset < 0 {
 		offset = 0
@@ -420,12 +445,12 @@ func (s *Service) ListOrders(ctx context.Context, shopID string, limit, offset i
 		       created_at
 		FROM "Event"
 		WHERE shop_id = $1 AND event_type = $2
-		ORDER BY created_at DESC
-		LIMIT $3 OFFSET $4
+		  AND created_at >= NOW() - INTERVAL '30 days'
+		ORDER BY created_at ASC
 	`
-	rows, err := s.pool.Query(ctx, q, shopID, eventstore.EventPosSale, limit, offset)
+	rows, err := s.pool.Query(ctx, q, shopID, eventstore.EventPosSale)
 	if err != nil {
-		return nil, fmt.Errorf("list orders query: %w", err)
+		return nil, 0, fmt.Errorf("list orders query: %w", err)
 	}
 	defer rows.Close()
 
@@ -434,7 +459,7 @@ func (s *Service) ListOrders(ctx context.Context, shopID string, limit, offset i
 		var id, et, sid, payloadStr string
 		var createdAt time.Time
 		if err := rows.Scan(&id, &et, &sid, &payloadStr, &createdAt); err != nil {
-			return nil, fmt.Errorf("list orders scan: %w", err)
+			return nil, 0, fmt.Errorf("list orders scan: %w", err)
 		}
 		var payload map[string]interface{}
 		_ = json.Unmarshal([]byte(payloadStr), &payload)
@@ -460,8 +485,10 @@ func (s *Service) ListOrders(ctx context.Context, shopID string, limit, offset i
 		}
 		payStatus, _ := payload["payment_status"].(string)
 		if payStatus == "" {
-			payStatus = "unpaid"
+			// Nest listOrders defaults historical orders without a payment status to paid.
+			payStatus = "paid"
 		}
+		sentToKitchen, _ := payload["sent_to_kitchen"].(bool)
 		total := 0.0
 		switch v := payload["total_amount"].(type) {
 		case float64:
@@ -474,6 +501,8 @@ func (s *Service) ListOrders(ctx context.Context, shopID string, limit, offset i
 			"orderId":        orderID,
 			"order_id":       orderID,
 			"status":         status,
+			"kitchenStatus":  status,
+			"sentToKitchen":  sentToKitchen,
 			"orderType":      orderType,
 			"order_type":     orderType,
 			"totalAmount":    total,
@@ -482,6 +511,9 @@ func (s *Service) ListOrders(ctx context.Context, shopID string, limit, offset i
 			"paymentStatus":  payStatus,
 			"payment_status": payStatus,
 			"paymentMethod":  payload["payment_method"],
+			"paymentSplits":  payload["payment_splits"],
+			"customerName":   payload["customer_name"],
+			"customerPhone":  payload["customer_phone"],
 			"createdAt":      createdAt.UTC().Format(time.RFC3339),
 			"created_at":     createdAt.UTC().Format(time.RFC3339),
 			"tableNumber":    payload["table_number"],
@@ -490,8 +522,9 @@ func (s *Service) ListOrders(ctx context.Context, shopID string, limit, offset i
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list orders rows: %w", err)
+		return nil, 0, fmt.Errorf("list orders rows: %w", err)
 	}
+	rows.Close() // release the connection before querying lifecycle events
 
 	// Fold later kitchen / status / payment events onto each order.
 	// Nest list shows lifecycle status; pos_sale alone is usually "not_sent".
@@ -557,7 +590,23 @@ func (s *Service) ListOrders(ctx context.Context, shopID string, limit, offset i
 		}
 	}
 
-	return out, nil
+	// Nest folds the last 30 days of order events, sorts the resulting orders
+	// newest-first, then paginates. Do not paginate raw sale events before the
+	// lifecycle fold or return the page length as the overall total.
+	sort.SliceStable(out, func(i, j int) bool {
+		ti, _ := time.Parse(time.RFC3339, fmt.Sprint(out[i]["createdAt"]))
+		tj, _ := time.Parse(time.RFC3339, fmt.Sprint(out[j]["createdAt"]))
+		return ti.After(tj)
+	})
+	total := len(out)
+	if offset >= total {
+		return []map[string]interface{}{}, total, nil
+	}
+	end := offset + limit
+	if end > total {
+		end = total
+	}
+	return out[offset:end], total, nil
 }
 
 func jsonUnmarshal(b []byte, v interface{}) error {
@@ -901,6 +950,19 @@ func (s *Service) SendToKitchen(ctx context.Context, shopID, orderID, actorUserI
 
 // UpdatePayment updates payment status on an order.
 func (s *Service) UpdatePayment(ctx context.Context, shopID, orderID, actorUserID string, status, method, mpesaRef, notes string) (map[string]interface{}, error) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	switch status {
+	case "paid", "pending", "failed", "unpaid":
+	default:
+		return nil, apperrors.BadRequest("Invalid payment_status")
+	}
+	method = strings.ToLower(strings.TrimSpace(method))
+	if method != "" && method != "cash" && method != "mpesa" && method != "card" && method != "split" {
+		return nil, apperrors.BadRequest("Invalid payment_method")
+	}
+	if shopID == "" {
+		return nil, apperrors.Forbidden("shop identity required")
+	}
 	existing, err := s.GetOrder(ctx, shopID, orderID)
 	if err != nil {
 		return nil, err

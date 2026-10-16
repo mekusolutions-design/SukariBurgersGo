@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/pkg/money"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 func (s *Service) ProductionHistory(ctx context.Context, shopID string, limit int) ([]map[string]interface{}, error) {
@@ -274,7 +274,7 @@ func (s *Service) SubmitClosingStockLines(ctx context.Context, shopID, actorUser
 		"batchId": batchID, "batchNumber": display, "eventId": event.ID,
 		"shop_id": shopID, "items_counted": len(payloadLines),
 		"items_flagged": flagged, "total_variance_value": totalVar,
-		"lines":   payloadLines,
+		"lines": payloadLines,
 		"message": "Closing stock count submitted successfully",
 	}, nil
 }

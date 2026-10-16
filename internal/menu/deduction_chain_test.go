@@ -61,13 +61,13 @@ func TestStringSliceFromLine_OptionsObjects(t *testing.T) {
 func TestPortionsFromLines_FIXEDUsesStock(t *testing.T) {
 	lines := []map[string]interface{}{
 		{
-			"componentType":    "FIXED",
-			"finishedGoodId":   "FG-TOPPING",
-			"quantityRequired": 2000.0,
+			"componentType":     "FIXED",
+			"finishedGoodId":    "FG-TOPPING",
+			"quantityRequired":  2000.0,
 		},
 	}
 	stock := map[string]float64{"FG-TOPPING": 10000}
-	maxP, fg := portionsFromLines(lines, stock, nil)
+	maxP, fg := portionsFromLines(lines, stock)
 	if maxP != 5 {
 		t.Fatalf("max portions want 5 got %d", maxP)
 	}
@@ -85,7 +85,7 @@ func TestPortionsFromLines_DoesNotUseMissingRawSKU(t *testing.T) {
 		"FG-TOPPING":     10000,
 		"CHICKEN BREAST": 11822,
 	}
-	maxP, _ := portionsFromLines(lines, stock, nil)
+	maxP, _ := portionsFromLines(lines, stock)
 	if maxP != 5 {
 		t.Fatalf("want 5 portions from FG only, got %d", maxP)
 	}
@@ -94,10 +94,10 @@ func TestPortionsFromLines_DoesNotUseMissingRawSKU(t *testing.T) {
 func TestNormalizeMenuLines_OptionsAlwaysArray(t *testing.T) {
 	lines := []map[string]interface{}{
 		{
-			"component_type":    "CHOICE",
-			"component_key":     "cheese",
+			"component_type":   "CHOICE",
+			"component_key":    "cheese",
 			"quantity_required": 200.0,
-			"option_item_ids":   []interface{}{"MOZZ"},
+			"option_item_ids":  []interface{}{"MOZZ"},
 		},
 	}
 	stock := map[string]float64{"MOZZ": 500}

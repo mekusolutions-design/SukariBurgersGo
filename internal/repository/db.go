@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/config"
+	"github.com/restflow/api-go/internal/config"
 )
 
 // NewPool creates a production-ready pgx connection pool.
@@ -56,6 +56,7 @@ func NewPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {
 
 	return pool, nil
 }
+
 
 // NewWorkerPool is a smaller pool for background jobs so POS/API keep headroom.
 func NewWorkerPool(ctx context.Context, cfg *config.Config) (*pgxpool.Pool, error) {

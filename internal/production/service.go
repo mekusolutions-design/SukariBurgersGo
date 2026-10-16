@@ -8,10 +8,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/costing"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/money"
+	"github.com/restflow/api-go/internal/eventstore"
+	apperrors "github.com/restflow/api-go/pkg/errors"
+	"github.com/restflow/api-go/pkg/costing"
+	"github.com/restflow/api-go/pkg/money"
 )
 
 type Service struct {
@@ -30,7 +30,7 @@ func NewServiceWithResolver(pool *pgxpool.Pool, es *eventstore.Store, _ interfac
 
 type StartInput struct {
 	ShopID, ActorUserID, RecipeID, RecipeName, IdempotencyKey string
-	BatchSize                                                 float64
+	BatchSize float64
 }
 
 type Line struct {
@@ -46,12 +46,12 @@ type Line struct {
 }
 
 type FinishInput struct {
-	ShopID, ActorUserID, ProductionID, ItemID, ItemName  string
-	RecipeID                                             string
-	BatchNumber, ExpiryDate, WasteReason                 string
+	ShopID, ActorUserID, ProductionID, ItemID, ItemName string
+	RecipeID                                            string
+	BatchNumber, ExpiryDate, WasteReason                string
 	PlannedQty, ActualQty, WasteQty, UnitCost, TotalCost float64
-	Inputs, Outputs                                      []Line
-	Raw                                                  map[string]interface{}
+	Inputs, Outputs                                     []Line
+	Raw                                                 map[string]interface{}
 }
 
 func TodayUTC() string {
@@ -242,7 +242,7 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) (map[string]interf
 			"actual_quantity": line.ActualQuantity,
 			"usable_quantity": uq, "quantity": uq,
 			"unit": line.Unit, "unit_cost": unitCostVal,
-			"line_cost":   uq * unitCostVal,
+			"line_cost": uq * unitCostVal,
 			"unit_weight": line.UnitWeight, "weight_unit": line.WeightUnit,
 		}
 		outputMaps = append(outputMaps, m)
@@ -394,20 +394,20 @@ func (s *Service) Finish(ctx context.Context, in FinishInput) (map[string]interf
 		msg = "Production finished; units unaccounted (planned > good + waste)"
 	}
 	return map[string]interface{}{
-		"success":              true,
-		"eventId":              event.ID,
-		"productionId":         in.ProductionID,
-		"production_id":        in.ProductionID,
-		"productionCost":       productionCost,
-		"production_cost":      productionCost,
-		"finishedUnitCost":     unitCostVal,
-		"unit_cost":            unitCostVal,
-		"goodQuantity":         goodQty,
-		"wasteQuantity":        wasteQty,
-		"totalMade":            totalMade,
-		"unaccountedQuantity":  unaccounted,
-		"costReconciliationOk": reconOK,
-		"message":              msg,
+		"success":               true,
+		"eventId":               event.ID,
+		"productionId":          in.ProductionID,
+		"production_id":         in.ProductionID,
+		"productionCost":        productionCost,
+		"production_cost":       productionCost,
+		"finishedUnitCost":      unitCostVal,
+		"unit_cost":             unitCostVal,
+		"goodQuantity":          goodQty,
+		"wasteQuantity":         wasteQty,
+		"totalMade":             totalMade,
+		"unaccountedQuantity":   unaccounted,
+		"costReconciliationOk":  reconOK,
+		"message":               msg,
 	}, nil
 }
 
@@ -438,11 +438,11 @@ func (s *Service) History(ctx context.Context, shopID string, limit int) (map[st
 	defer rows.Close()
 
 	type row struct {
-		id, et  string
-		itemID  *string
-		qty     *float64
-		payload []byte
-		created time.Time
+		id, et     string
+		itemID     *string
+		qty        *float64
+		payload    []byte
+		created    time.Time
 	}
 	var raw []row
 	for rows.Next() {
@@ -455,7 +455,7 @@ func (s *Service) History(ctx context.Context, shopID string, limit int) (map[st
 
 	type run struct {
 		ProductionID, RecipeID, RecipeName, ItemID, BatchNumber, Status, StartedAt, FinishedAt string
-		BatchSize, ActualYield                                                                 float64
+		BatchSize, ActualYield float64
 	}
 	byID := map[string]*run{}
 	order := []string{}
@@ -545,6 +545,7 @@ func (s *Service) History(ctx context.Context, shopID string, limit int) (map[st
 	}
 	return map[string]interface{}{"items": items, "total": len(items), "shopId": shopID}, nil
 }
+
 
 // resolveLines mirrors Nest production.service resolveLines.
 // When client omits inputs, scale RecipeIngredient by actual/standard_yield.

@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/receiving"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/receiving"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type ReceivedHandler struct {
@@ -29,7 +29,7 @@ type receiveRequest struct {
 	BatchNumber      string   `json:"batch_number"`
 	ExpiryDate       string   `json:"expiry_date"`
 	DateReceived     string   `json:"date_received"`
-	SupplierName     string   `json:"supplier_name"`
+	SupplierName    string   `json:"supplier_name"`
 	SupplierNumber   string   `json:"supplier_number"`
 	SupplierID       string   `json:"supplier_id"`
 	ApprovedBy       string   `json:"approved_by"`
@@ -77,27 +77,27 @@ func (h *ReceivedHandler) Receive(w http.ResponseWriter, r *http.Request) {
 	}
 
 	in := receiving.ReceiveInput{
-		ItemID:           mapString(m, "item_id", "itemId"),
-		ItemName:         mapString(m, "item_name", "itemName"),
-		Units:            mapString(m, "units", "unit"),
-		Category:         mapString(m, "category"),
-		Quantity:         qty,
+		ItemID: mapString(m, "item_id", "itemId"),
+		ItemName: mapString(m, "item_name", "itemName"),
+		Units: mapString(m, "units", "unit"),
+		Category: mapString(m, "category"),
+		Quantity: qty,
 		QuantityApproved: qtyApproved,
-		UnitCost:         unitCost,
-		TotalCost:        totalCost,
-		BatchNumber:      mapString(m, "batch_number", "batchNumber"),
-		ExpiryDate:       expiry,
-		DateReceived:     mapString(m, "date_received", "dateReceived"),
-		SupplierName:     mapString(m, "supplier_name", "supplierName"),
-		SupplierNumber:   mapString(m, "supplier_number", "supplierNumber"),
-		SupplierID:       mapString(m, "supplier_id", "supplierId"),
-		ApprovedBy:       mapString(m, "approved_by", "approvedBy"),
-		Reference:        mapString(m, "reference"),
-		WasteReason:      mapString(m, "waste_reason", "wasteReason"),
-		WastePhotoURL:    mapString(m, "waste_photo_url", "wastePhotoUrl"),
-		ShopID:           auth.ShopIDFromContext(r.Context()),
-		ActorUserID:      auth.UserIDFromContext(r.Context()),
-		IdempotencyKey:   idem,
+		UnitCost: unitCost,
+		TotalCost: totalCost,
+		BatchNumber: mapString(m, "batch_number", "batchNumber"),
+		ExpiryDate: expiry,
+		DateReceived: mapString(m, "date_received", "dateReceived"),
+		SupplierName: mapString(m, "supplier_name", "supplierName"),
+		SupplierNumber: mapString(m, "supplier_number", "supplierNumber"),
+		SupplierID: mapString(m, "supplier_id", "supplierId"),
+		ApprovedBy: mapString(m, "approved_by", "approvedBy"),
+		Reference: mapString(m, "reference"),
+		WasteReason: mapString(m, "waste_reason", "wasteReason"),
+		WastePhotoURL: mapString(m, "waste_photo_url", "wastePhotoUrl"),
+		ShopID: auth.ShopIDFromContext(r.Context()),
+		ActorUserID: auth.UserIDFromContext(r.Context()),
+		IdempotencyKey: idem,
 	}
 
 	result, err := h.svc.Receive(r.Context(), in)

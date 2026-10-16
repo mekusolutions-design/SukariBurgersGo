@@ -3,9 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/waste"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/waste"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 type WasteHandler struct {
@@ -28,15 +28,15 @@ func (h *WasteHandler) Record(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := h.svc.Record(r.Context(), waste.RecordInput{
 		ShopID: auth.ShopIDFromContext(r.Context()), ActorUserID: auth.UserIDFromContext(r.Context()),
-		ItemID:         mapString(m, "item_id", "itemId"),
-		ItemName:       mapString(m, "item_name", "itemName"),
-		BatchNumber:    mapString(m, "batch_number", "batchNumber"),
-		Unit:           mapString(m, "unit", "units"),
-		Reason:         mapString(m, "reason", "waste_reason", "wasteReason"),
-		PhotoURL:       mapString(m, "photo_url", "photoUrl", "waste_photo_url", "wastePhotoUrl"),
+		ItemID: mapString(m, "item_id", "itemId"),
+		ItemName: mapString(m, "item_name", "itemName"),
+		BatchNumber: mapString(m, "batch_number", "batchNumber"),
+		Unit: mapString(m, "unit", "units"),
+		Reason: mapString(m, "reason", "waste_reason", "wasteReason"),
+		PhotoURL: mapString(m, "photo_url", "photoUrl", "waste_photo_url", "wastePhotoUrl"),
 		IdempotencyKey: idem,
-		Quantity:       mapFloat(m, "quantity"),
-		UnitCost:       mapFloat(m, "unit_cost", "unitCost"),
+		Quantity: mapFloat(m, "quantity"),
+		UnitCost: mapFloat(m, "unit_cost", "unitCost"),
 	})
 	if err != nil {
 		apperrors.WriteJSON(w, r, err)

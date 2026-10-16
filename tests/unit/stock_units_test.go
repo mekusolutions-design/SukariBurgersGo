@@ -4,7 +4,7 @@ import (
 	"math"
 	"testing"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/units"
+	"github.com/restflow/api-go/internal/units"
 )
 
 func almostEqual(a, b float64) bool {

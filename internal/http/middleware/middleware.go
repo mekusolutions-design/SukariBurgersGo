@@ -7,10 +7,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/observability"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/logging"
+	"github.com/restflow/api-go/internal/auth"
+	apperrors "github.com/restflow/api-go/pkg/errors"
+	"github.com/restflow/api-go/internal/observability"
+	"github.com/restflow/api-go/pkg/logging"
 	"log/slog"
 )
 

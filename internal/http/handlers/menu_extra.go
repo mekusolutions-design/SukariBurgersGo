@@ -4,18 +4,17 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/menu"
-	apperrors "github.com/mekusolutions-design/SukariBurgersGo/pkg/errors"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/menu"
+	apperrors "github.com/restflow/api-go/pkg/errors"
 )
 
 func (h *MenuHandler) ListMenus(w http.ResponseWriter, r *http.Request) {
-	shopID := r.URL.Query().Get("shopId")
+	// Match Nest's @CurrentShop behavior; query strings cannot switch tenants.
+	shopID := auth.ShopIDFromContext(r.Context())
 	if shopID == "" {
-		shopID = r.URL.Query().Get("shop_id")
-	}
-	if shopID == "" {
-		shopID = auth.ShopIDFromContext(r.Context())
+		apperrors.WriteJSON(w, r, apperrors.Forbidden("shop identity required"))
+		return
 	}
 	out, err := h.svc.ListMenus(r.Context(), shopID)
 	if err != nil {

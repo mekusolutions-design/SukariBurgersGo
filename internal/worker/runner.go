@@ -7,34 +7,34 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/projections"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/internal/projections"
 )
 
 // Runner claims and executes jobs.
 type Runner struct {
-	jobs       *Store
-	rebuild    *RebuildHandler
-	report     *ReportHandler
-	reconcile  *ReconcileHandler
-	variance   *VarianceConsumptionHandler
-	expiry     *ExpiryHandler
-	log        *slog.Logger
-	poll       time.Duration
+	jobs     *Store
+	rebuild  *RebuildHandler
+	report   *ReportHandler
+	reconcile *ReconcileHandler
+	variance *VarianceConsumptionHandler
+	expiry   *ExpiryHandler
+	log      *slog.Logger
+	poll     time.Duration
 	jobTimeout time.Duration
 }
 
 func NewRunner(pool *pgxpool.Pool, es *eventstore.Store, log *slog.Logger) *Runner {
 	engine := projections.NewEngine(log)
 	return &Runner{
-		jobs:       NewStore(pool),
-		rebuild:    NewRebuildHandler(pool, es, engine, log, 200),
-		report:     NewReportHandler(pool, log),
-		reconcile:  NewReconcileHandler(pool, es, log),
-		variance:   NewVarianceConsumptionHandler(pool, log),
-		expiry:     NewExpiryHandler(pool, es, log),
-		log:        log,
-		poll:       3 * time.Second,
+		jobs:      NewStore(pool),
+		rebuild:   NewRebuildHandler(pool, es, engine, log, 200),
+		report:    NewReportHandler(pool, log),
+		reconcile: NewReconcileHandler(pool, es, log),
+		variance:  NewVarianceConsumptionHandler(pool, log),
+		expiry:    NewExpiryHandler(pool, es, log),
+		log:       log,
+		poll:      3 * time.Second,
 		jobTimeout: 6 * time.Hour,
 	}
 }

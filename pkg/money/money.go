@@ -141,8 +141,8 @@ func (m Money) AsTotal() Money {
 	return Money{d: m.d.Round(Scale)}
 }
 
-func (m Money) Cmp(o Money) int          { return m.d.Cmp(o.d) }
-func (m Money) Equal(o Money) bool       { return m.d.Equal(o.d) }
+func (m Money) Cmp(o Money) int  { return m.d.Cmp(o.d) }
+func (m Money) Equal(o Money) bool { return m.d.Equal(o.d) }
 func (m Money) GreaterThan(o Money) bool { return m.d.GreaterThan(o.d) }
 func (m Money) LessThan(o Money) bool    { return m.d.LessThan(o.d) }
 func (m Money) Abs() Money               { return Money{d: m.d.Abs()} }

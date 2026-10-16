@@ -10,29 +10,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/approvals"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/auth"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/config"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/dashboard"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/eventstore"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/http/handlers"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/http/router"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/inventory"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/kitchen"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/menu"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/notifications"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/payments"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/pos"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/production"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/projections"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/realtime"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/receiving"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/recipe"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/repository"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/sync"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/variance"
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/waste"
-	"github.com/mekusolutions-design/SukariBurgersGo/pkg/logging"
+	"github.com/restflow/api-go/internal/approvals"
+	"github.com/restflow/api-go/internal/auth"
+	"github.com/restflow/api-go/internal/config"
+	"github.com/restflow/api-go/internal/dashboard"
+	"github.com/restflow/api-go/internal/eventstore"
+	"github.com/restflow/api-go/internal/http/handlers"
+	"github.com/restflow/api-go/internal/http/router"
+	"github.com/restflow/api-go/internal/inventory"
+	"github.com/restflow/api-go/internal/kitchen"
+	"github.com/restflow/api-go/internal/menu"
+	"github.com/restflow/api-go/internal/notifications"
+	"github.com/restflow/api-go/internal/payments"
+	"github.com/restflow/api-go/internal/pos"
+	"github.com/restflow/api-go/internal/production"
+	"github.com/restflow/api-go/internal/projections"
+	"github.com/restflow/api-go/internal/realtime"
+	"github.com/restflow/api-go/internal/receiving"
+	"github.com/restflow/api-go/internal/recipe"
+	"github.com/restflow/api-go/internal/repository"
+	"github.com/restflow/api-go/internal/sync"
+	"github.com/restflow/api-go/internal/variance"
+	"github.com/restflow/api-go/internal/waste"
+	"github.com/restflow/api-go/pkg/logging"
 )
 
 func TestFullFlowAgainstDB(t *testing.T) {
@@ -69,23 +69,23 @@ func TestFullFlowAgainstDB(t *testing.T) {
 
 	h := router.New(router.Deps{
 		Cfg: cfg, Log: log, AuthSvc: authSvc, Hub: hub,
-		AuthH:          handlers.NewAuthHandler(authSvc),
-		UsersH:         handlers.NewUsersHandler(authSvc),
-		HealthH:        handlers.NewHealthHandler(pool),
-		InventoryH:     handlers.NewInventoryHandler(inventory.NewService(pool)),
-		ReceivedH:      handlers.NewReceivedHandler(receiving.NewService(pool, es)),
-		POSH:           handlers.NewPOSHandler(pos.NewService(pool, es, resolve)),
-		KitchenH:       handlers.NewKitchenHandler(kitchen.NewService(pool, es)),
-		RecipeH:        handlers.NewRecipeHandler(recipe.NewService(pool)),
-		WasteH:         handlers.NewWasteHandler(waste.NewService(pool, es)),
-		ProductionH:    handlers.NewProductionHandler(production.NewService(pool, es, resolve)),
-		PaymentH:       handlers.NewPaymentHandler(payments.NewService(pool, es, cfg, log)),
-		VarianceH:      handlers.NewVarianceHandler(variance.NewService(pool, es)),
-		ApprovalsH:     handlers.NewApprovalsHandler(approvals.NewService(pool, es)),
-		SyncH:          handlers.NewSyncHandler(sync.NewService(pool, es)),
-		DashboardH:     handlers.NewDashboardHandler(dashboard.NewService(pool)),
+		AuthH: handlers.NewAuthHandler(authSvc),
+		UsersH: handlers.NewUsersHandler(authSvc),
+		HealthH: handlers.NewHealthHandler(pool),
+		InventoryH: handlers.NewInventoryHandler(inventory.NewService(pool)),
+		ReceivedH: handlers.NewReceivedHandler(receiving.NewService(pool, es)),
+		POSH: handlers.NewPOSHandler(pos.NewService(pool, es, resolve)),
+		KitchenH: handlers.NewKitchenHandler(kitchen.NewService(pool, es)),
+		RecipeH: handlers.NewRecipeHandler(recipe.NewService(pool)),
+		WasteH: handlers.NewWasteHandler(waste.NewService(pool, es)),
+		ProductionH: handlers.NewProductionHandler(production.NewService(pool, es, resolve)),
+		PaymentH: handlers.NewPaymentHandler(payments.NewService(pool, es, cfg, log)),
+		VarianceH: handlers.NewVarianceHandler(variance.NewService(pool, es)),
+		ApprovalsH: handlers.NewApprovalsHandler(approvals.NewService(pool, es)),
+		SyncH: handlers.NewSyncHandler(sync.NewService(pool, es)),
+		DashboardH: handlers.NewDashboardHandler(dashboard.NewService(pool)),
 		NotificationsH: handlers.NewNotificationsHandler(notifications.NewService(pool, es)),
-		MenuH:          handlers.NewMenuHandler(resolve),
+		MenuH: handlers.NewMenuHandler(resolve),
 	})
 
 	// Health
