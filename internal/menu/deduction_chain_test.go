@@ -67,7 +67,7 @@ func TestPortionsFromLines_FIXEDUsesStock(t *testing.T) {
 		},
 	}
 	stock := map[string]float64{"FG-TOPPING": 10000}
-	maxP, fg := portionsFromLines(lines, stock)
+	maxP, fg := portionsFromLines(lines, stock, nil)
 	if maxP != 5 {
 		t.Fatalf("max portions want 5 got %d", maxP)
 	}
@@ -85,7 +85,7 @@ func TestPortionsFromLines_DoesNotUseMissingRawSKU(t *testing.T) {
 		"FG-TOPPING":     10000,
 		"CHICKEN BREAST": 11822,
 	}
-	maxP, _ := portionsFromLines(lines, stock)
+	maxP, _ := portionsFromLines(lines, stock, nil)
 	if maxP != 5 {
 		t.Fatalf("want 5 portions from FG only, got %d", maxP)
 	}

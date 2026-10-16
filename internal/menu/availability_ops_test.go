@@ -9,7 +9,7 @@ func TestOps_SinglePatty_LettuceOnly(t *testing.T) {
 		{"componentType": "FIXED", "finishedGoodId": "LETTUCE", "quantityRequired": 1.0},
 	}
 	stock := map[string]float64{"LETTUCE": 7}
-	r := ComputeMenuAvailability(lines, stock)
+	r := ComputeMenuAvailability(lines, stock, nil)
 	if r.MaxPortions != 7 {
 		t.Fatalf("want 7, got %d", r.MaxPortions)
 	}
@@ -21,7 +21,7 @@ func TestOps_SinglePattyBacon(t *testing.T) {
 		{"componentType": "FIXED", "finishedGoodId": "BACON", "quantityRequired": 30.0},
 	}
 	stock := map[string]float64{"LETTUCE": 7, "BACON": 82.5}
-	r := ComputeMenuAvailability(lines, stock)
+	r := ComputeMenuAvailability(lines, stock, nil)
 	// bacon 82.5/30 = 2
 	if r.MaxPortions != 2 {
 		t.Fatalf("want 2, got %d breakdown=%+v", r.MaxPortions, r.Lines)
@@ -34,7 +34,7 @@ func TestOps_SinglePattyCheese_CheddarExhausted(t *testing.T) {
 		{"componentType": "FIXED", "finishedGoodId": "CHEDDAR", "quantityRequired": 43.48},
 	}
 	stock := map[string]float64{"LETTUCE": 7, "CHEDDAR": 6.5}
-	r := ComputeMenuAvailability(lines, stock)
+	r := ComputeMenuAvailability(lines, stock, nil)
 	if r.MaxPortions != 0 {
 		t.Fatalf("want 0, got %d", r.MaxPortions)
 	}
@@ -49,7 +49,7 @@ func TestOps_DoublePattyDoubleBacon(t *testing.T) {
 		{"componentType": "FIXED", "finishedGoodId": "BACON", "quantityRequired": 60.0},
 	}
 	stock := map[string]float64{"LETTUCE": 7, "BACON": 82.5}
-	r := ComputeMenuAvailability(lines, stock)
+	r := ComputeMenuAvailability(lines, stock, nil)
 	// 82.5/60 = 1
 	if r.MaxPortions != 1 {
 		t.Fatalf("want 1, got %d", r.MaxPortions)
@@ -62,7 +62,7 @@ func TestOps_DoublePattyDoubleCheese(t *testing.T) {
 		{"componentType": "FIXED", "finishedGoodId": "CHEDDAR", "quantityRequired": 86.96},
 	}
 	stock := map[string]float64{"LETTUCE": 7, "CHEDDAR": 6.5}
-	r := ComputeMenuAvailability(lines, stock)
+	r := ComputeMenuAvailability(lines, stock, nil)
 	if r.MaxPortions != 0 {
 		t.Fatalf("want 0, got %d", r.MaxPortions)
 	}
@@ -79,7 +79,7 @@ func TestOps_StandaloneBaconDoesNotInflateBurger(t *testing.T) {
 		"LETTUCE":   7,
 		"BACON-PCS": 1425, // standalone menu chip — wrong SKU
 	}
-	r := ComputeMenuAvailability(lines, stock)
+	r := ComputeMenuAvailability(lines, stock, nil)
 	if r.MaxPortions != 2 {
 		t.Fatalf("want 2 (from BACON-G), got %d", r.MaxPortions)
 	}
@@ -90,7 +90,7 @@ func TestOps_SodaFixedByStockItemID(t *testing.T) {
 		{"componentType": "FIXED", "finishedGoodId": "SODA-300", "quantityRequired": 1.0},
 	}
 	stock := map[string]float64{"SODA-300": 34}
-	r := ComputeMenuAvailability(lines, stock)
+	r := ComputeMenuAvailability(lines, stock, nil)
 	if r.MaxPortions != 34 {
 		t.Fatalf("want 34, got %d", r.MaxPortions)
 	}
@@ -116,7 +116,7 @@ func TestOps_RecipeConstraints_MinAcrossIngredients(t *testing.T) {
 		{"componentType": "FIXED", "finishedGoodId": "CHEDDAR", "quantityRequired": 43.48},
 	}
 	stock := map[string]float64{"LETTUCE": 7, "BACON": 82.5, "CHEDDAR": 6.5}
-	r := ComputeMenuAvailability(lines, stock)
+	r := ComputeMenuAvailability(lines, stock, nil)
 	if r.MaxPortions != 0 {
 		t.Fatalf("cheese-limited want 0, got %d", r.MaxPortions)
 	}

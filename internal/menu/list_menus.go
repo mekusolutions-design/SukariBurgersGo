@@ -278,19 +278,30 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		}
 	}
 
-	// stock map
+	// stock map + units (Item.unit) — required for g/ml vs pcs portion math
 	stock := map[string]float64{}
-	srows, _ := s.pool.Query(ctx, `SELECT item_id, COALESCE(available_stock,0) FROM "InventoryProjection" WHERE shop_id=$1`, shopID)
+	stockUnits := map[string]string{}
+	srows, _ := s.pool.Query(ctx, `
+		SELECT p.item_id, COALESCE(p.available_stock,0), COALESCE(i.unit, 'pcs')
+		FROM "InventoryProjection" p
+		LEFT JOIN "Item" i ON i.item_id = p.item_id
+		WHERE p.shop_id=$1`, shopID)
 	if srows != nil {
 		for srows.Next() {
-			var id string
+			var id, unit string
 			var a float64
-			if srows.Scan(&id, &a) == nil {
+			if srows.Scan(&id, &a, &unit) == nil {
 				stock[id] = a
-				// Mirror keys so menu item_ids with different casing still resolve
+				if unit == "" {
+					unit = "pcs"
+				}
+				stockUnits[id] = unit
 				if u := strings.ToUpper(id); u != id {
 					if _, exists := stock[u]; !exists {
 						stock[u] = a
+					}
+					if _, exists := stockUnits[u]; !exists {
+						stockUnits[u] = unit
 					}
 				}
 			}
@@ -424,7 +435,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		// Nest/ops: also constrain by recipe ingredients (bacon g, cheddar g, …)
 		linesIn = s.enrichLinesWithRecipeConstraints(ctx, shopID, linesIn, m.menuID, m.code, m.name, m.finishedGoodID, m.recipeID, recipeCache)
 		normLines, reqSel := normalizeMenuLines(linesIn, stock)
-		maxP, fgID := portionsFromLines(normLines, stock)
+		maxP, fgID := portionsFromLines(normLines, stock, stockUnits)
 		if fgID == "" && m.finishedGoodID != "" {
 			fgID = m.finishedGoodID
 		}
@@ -444,25 +455,25 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				compOnly = append(compOnly, lm)
 			}
 			if len(compOnly) > 0 {
-				if p2, fg2 := portionsFromLines(compOnly, stock); p2 > 0 {
+				if p2, fg2 := portionsFromLines(compOnly, stock, stockUnits); p2 > 0 {
 					maxP = p2
 					if fgID == "" {
 						fgID = fg2
 					}
 				}
 			}
-			// Root finished good / catalog stock item — same as Menu page FG availability
+			// Root FG only when inventory is count (pcs). Never treat grams/ml as portion count.
 			if maxP == 0 && m.finishedGoodID != "" {
 				need := m.quantityRequired
 				if need <= 0 {
 					need = 1
 				}
 				have := stockLookup(stock, m.finishedGoodID)
-				if have > 0 {
-					maxP = int(have / need)
-					if maxP < 0 {
-						maxP = 0
-					}
+				hu := stockUnitLookup(stockUnits, m.finishedGoodID)
+				nu := firstNonEmpty(m.unit, "pcs")
+				p := portionsFromHaveNeed(have, need, hu, nu)
+				if p > 0 {
+					maxP = p
 					if fgID == "" {
 						fgID = m.finishedGoodID
 					}
@@ -667,8 +678,8 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 	return out, requiresSelection
 }
 
-func portionsFromLines(lines []map[string]interface{}, stock map[string]float64) (int, string) {
-	r := ComputeMenuAvailability(lines, stock)
+func portionsFromLines(lines []map[string]interface{}, stock map[string]float64, stockUnits map[string]string) (int, string) {
+	r := ComputeMenuAvailability(lines, stock, stockUnits)
 	return r.MaxPortions, r.FirstFG
 }
 

@@ -3,6 +3,8 @@ package menu
 import (
 	"math"
 	"strings"
+
+	"github.com/mekusolutions-design/SukariBurgersGo/internal/units"
 )
 
 // AvailabilityLine is one stock constraint used for max portions.
@@ -40,14 +42,54 @@ func hasStockConstraints(lines []map[string]interface{}) bool {
 	return false
 }
 
-// ComputeMenuAvailability implements Nest Menu maxPortions:
-//
-//	portions = min over ALL required constraints of floor(have / need)
-//
-// FIXED / INVENTORY: finished_good_id only (not option min).
-// CHOICE / MULTI_CHOICE: sum of option stocks / need.
-// FIXED with only option_item_ids: sum options / need (inventory-select).
-func ComputeMenuAvailability(lines []map[string]interface{}, stock map[string]float64) MenuAvailabilityResult {
+// portionsFromHaveNeed converts stock into the need unit before floor division.
+// Prevents "49953 left" when inventory is grams and need defaults to 1 pcs.
+func portionsFromHaveNeed(have, need float64, haveUnit, needUnit string) int {
+	if need <= 0 {
+		need = 1
+	}
+	if have <= 0 {
+		return 0
+	}
+	haveU := units.NormalizeUnit(haveUnit)
+	needU := units.NormalizeUnit(needUnit)
+	if needU == "" {
+		needU = "pcs"
+	}
+	if haveU == "" {
+		haveU = needU
+	}
+
+	haveBase, haveDim := units.ToBaseQuantity(have, haveU)
+	needBase, needDim := units.ToBaseQuantity(need, needU)
+
+	// Dimension mismatch (e.g. grams of cheese vs need 1 "pcs"): do not treat raw mass as portions.
+	if haveDim != units.DimOther && needDim != units.DimOther && haveDim != needDim {
+		return 0
+	}
+	// Mass/volume with need still at default 1 and huge on-hand → refuse (likely missing recipe qty).
+	if (haveDim == units.DimMass || haveDim == units.DimVolume) && need <= 1.0001 && haveBase > 500 {
+		// only allow if need unit is also mass/volume with real recipe qty (need already > 1 after conversion path)
+		if needU == "pcs" || needU == "" {
+			return 0
+		}
+	}
+	if needBase <= 0 {
+		return 0
+	}
+	p := int(math.Floor(haveBase / needBase))
+	if p < 0 {
+		return 0
+	}
+	// Hard sanity: no menu should claim tens of thousands of portions
+	if p > 9999 {
+		return 9999
+	}
+	return p
+}
+
+// ComputeMenuAvailability: portions = min over constraints of floor(have/need) with unit conversion.
+func ComputeMenuAvailability(lines []map[string]interface{}, stock map[string]float64, stockUnits map[string]string) MenuAvailabilityResult {
 	res := MenuAvailabilityResult{MaxPortions: 0, Lines: nil}
 	if len(lines) == 0 {
 		return res
@@ -66,6 +108,10 @@ func ComputeMenuAvailability(lines []map[string]interface{}, stock map[string]fl
 		if need <= 0 {
 			need = 1
 		}
+		needUnit := firstStr(lm, "unit")
+		if needUnit == "" {
+			needUnit = "pcs"
+		}
 
 		fg := firstStr(lm, "finishedGoodId", "finished_good_id", "inventory_item_id", "inventoryItemId")
 		optIDs := collectOptionIDs(lm)
@@ -83,13 +129,23 @@ func ComputeMenuAvailability(lines []map[string]interface{}, stock map[string]fl
 				firstFG = ids[0]
 			}
 			total := 0.0
+			// Sum in need-unit after conversion per option
 			for _, id := range ids {
-				total += stockLookup(stock, id)
+				h := stockLookup(stock, id)
+				hu := stockUnitLookup(stockUnits, id)
+				// convert each have into need unit
+				conv := units.ConvertQuantity(h, hu, needUnit)
+				// if dimension mismatch ConvertQuantity returns unchanged — skip bad dims
+				hb, hd := units.ToBaseQuantity(h, hu)
+				nb, nd := units.ToBaseQuantity(1, needUnit)
+				if hd != units.DimOther && nd != units.DimOther && hd != nd {
+					continue
+				}
+				_ = hb
+				_ = nb
+				total += conv
 			}
-			p := int(math.Floor(total / need))
-			if p < 0 {
-				p = 0
-			}
+			p := portionsFromHaveNeed(total, need, needUnit, needUnit)
 			breakdown = append(breakdown, AvailabilityLine{ItemID: ids[0], Need: need, Have: total, Portions: p})
 			if p < minP {
 				minP = p
@@ -101,17 +157,29 @@ func ComputeMenuAvailability(lines []map[string]interface{}, stock map[string]fl
 					firstFG = fg
 				}
 				have := stockLookup(stock, fg)
-				p := int(math.Floor(have / need))
-				if p < 0 {
-					p = 0
+				haveUnit := stockUnitLookup(stockUnits, fg)
+				if needUnit == "pcs" && haveUnit != "" && haveUnit != "pcs" {
+					// Prefer inventory unit as need unit when line forgot grams
+					// only if quantity looks like a recipe weight (need != 1 or unit was set on line)
+					if firstStr(lm, "unit") != "" {
+						// keep needUnit from line
+					} else if units.NormalizeUnit(haveUnit) == "g" || units.NormalizeUnit(haveUnit) == "ml" {
+						// need is likely wrong (default 1 pcs) against mass stock — zero this constraint
+						// unless quantityRequired was explicitly set > 0 from recipe
+						if floatAny(lm["quantityRequired"]) <= 0 && floatAny(lm["quantity_required"]) <= 0 {
+							have = 0
+						} else {
+							needUnit = haveUnit
+						}
+					}
 				}
+				p := portionsFromHaveNeed(have, need, haveUnit, needUnit)
 				breakdown = append(breakdown, AvailabilityLine{ItemID: fg, Need: need, Have: have, Portions: p})
 				if p < minP {
 					minP = p
 				}
 				continue
 			}
-			// Inventory-select FIXED without finished_good_id
 			if len(optIDs) == 0 {
 				continue
 			}
@@ -120,12 +188,11 @@ func ComputeMenuAvailability(lines []map[string]interface{}, stock map[string]fl
 			}
 			total := 0.0
 			for _, id := range optIDs {
-				total += stockLookup(stock, id)
+				h := stockLookup(stock, id)
+				hu := stockUnitLookup(stockUnits, id)
+				total += units.ConvertQuantity(h, hu, needUnit)
 			}
-			p := int(math.Floor(total / need))
-			if p < 0 {
-				p = 0
-			}
+			p := portionsFromHaveNeed(total, need, needUnit, needUnit)
 			breakdown = append(breakdown, AvailabilityLine{ItemID: optIDs[0], Need: need, Have: total, Portions: p})
 			if p < minP {
 				minP = p
@@ -145,6 +212,20 @@ func ComputeMenuAvailability(lines []map[string]interface{}, stock map[string]fl
 		FirstFG:     firstFG,
 		Lines:       breakdown,
 	}
+}
+
+func stockUnitLookup(stockUnits map[string]string, itemID string) string {
+	if stockUnits == nil || itemID == "" {
+		return "pcs"
+	}
+	if u, ok := stockUnits[itemID]; ok && u != "" {
+		return u
+	}
+	up := strings.ToUpper(itemID)
+	if u, ok := stockUnits[up]; ok && u != "" {
+		return u
+	}
+	return "pcs"
 }
 
 func collectOptionIDs(lm map[string]interface{}) []string {
@@ -214,4 +295,3 @@ func itoa(n int) string {
 	}
 	return string(b[i:])
 }
-
