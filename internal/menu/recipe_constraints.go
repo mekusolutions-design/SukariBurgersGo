@@ -5,111 +5,60 @@ import (
 	"strings"
 )
 
-// enrichRecipeConstraints adds RecipeIngredient FIXED lines so POS matches Menu:
-// min over bacon g, cheddar g, lettuce, etc.
-//
-// Keys tried (in order):
-//  1. explicit recipe_id (catalog / event)
-//  2. menu code / MENU- strip / root finished good
-// Only applies an expansion when it returns a real BOM (2+ ingredients),
-// so FIXED sodas are never pulled into a false single-ingredient recipe.
-// Display name alone is never used (avoids CHEESE / BACON standalone SKUs).
-func (s *ResolutionService) enrichRecipeConstraints(
+// enrichExplicitRecipe appends RecipeIngredient lines only for a known recipe_id.
+// Never matches by display name (protects FIXED sodas / standalone BACON chips).
+func (s *ResolutionService) enrichExplicitRecipe(
 	ctx context.Context,
-	shopID string,
+	shopID, recipeID string,
 	lines []map[string]interface{},
-	menuID, code, rootFG, recipeID string,
 	cache map[string][]StockDeduction,
 ) []map[string]interface{} {
-	if s == nil || s.pool == nil {
+	recipeID = strings.TrimSpace(recipeID)
+	if s == nil || s.pool == nil || recipeID == "" {
+		return lines
+	}
+	ck := strings.ToUpper(recipeID)
+	var ded []StockDeduction
+	if cache != nil {
+		if v, ok := cache[ck]; ok {
+			ded = v
+		}
+	}
+	if ded == nil {
+		got, err := s.expandRecipe(ctx, shopID, recipeID, 1)
+		if err != nil || len(got) == 0 {
+			if cache != nil {
+				cache[ck] = []StockDeduction{}
+			}
+			return lines
+		}
+		if cache != nil {
+			cache[ck] = got
+		}
+		ded = got
+	}
+	if len(ded) == 0 {
 		return lines
 	}
 
-	keys := make([]string, 0, 6)
+	out := append([]map[string]interface{}{}, lines...)
 	seen := map[string]bool{}
-	add := func(k string) {
-		k = strings.TrimSpace(k)
-		if k == "" {
-			return
-		}
-		u := strings.ToUpper(k)
-		if seen[u] {
-			return
-		}
-		seen[u] = true
-		keys = append(keys, k)
-	}
-	add(recipeID)
-	add(code)
-	if strings.HasPrefix(strings.ToUpper(menuID), "MENU-") && len(menuID) > 5 {
-		add(menuID[5:])
-	}
-	add(menuID)
-	add(rootFG)
-
-	explicit := strings.TrimSpace(recipeID) != ""
-
-	for _, key := range keys {
-		ded := s.cachedRecipeExpand(ctx, shopID, key, cache)
-		if len(ded) == 0 {
+	for _, d := range ded {
+		if d.ItemID == "" || d.Quantity <= 0 {
 			continue
 		}
-		// Without explicit recipe_id, require multi-ingredient BOM (burger recipes).
-		if !explicit && len(ded) < 2 {
+		k := strings.ToUpper(strings.TrimSpace(d.ItemID))
+		if seen[k] {
 			continue
 		}
-		out := make([]map[string]interface{}, len(lines))
-		copy(out, lines)
-		added := map[string]bool{}
-		for _, d := range ded {
-			if d.ItemID == "" || d.Quantity <= 0 {
-				continue
-			}
-			ck := strings.ToUpper(strings.TrimSpace(d.ItemID))
-			if added[ck] {
-				continue
-			}
-			added[ck] = true
-			out = append(out, map[string]interface{}{
-				"componentType":     "FIXED",
-				"component_type":    "FIXED",
-				"componentKey":      "recipe_" + ck,
-				"component_key":     "recipe_" + ck,
-				"finishedGoodId":    d.ItemID,
-				"finished_good_id":  d.ItemID,
-				"quantityRequired":  d.Quantity,
-				"quantity_required": d.Quantity,
-				"unit":              firstNonEmpty(d.Unit, "pcs"),
-			})
-		}
-		return out
+		seen[k] = true
+		out = append(out, map[string]interface{}{
+			"componentType": "FIXED", "component_type": "FIXED",
+			"componentKey": "recipe_" + k, "component_key": "recipe_" + k,
+			"finishedGoodId": d.ItemID, "finished_good_id": d.ItemID,
+			"quantityRequired": d.Quantity, "quantity_required": d.Quantity,
+			"unit": firstNonEmpty(d.Unit, "pcs"),
+		})
 	}
-	return lines
-}
-
-func (s *ResolutionService) cachedRecipeExpand(
-	ctx context.Context,
-	shopID, key string,
-	cache map[string][]StockDeduction,
-) []StockDeduction {
-	ck := strings.ToUpper(strings.TrimSpace(key))
-	if ck == "" {
-		return nil
-	}
-	if cache != nil {
-		if v, ok := cache[ck]; ok {
-			return v
-		}
-	}
-	ded, err := s.expandRecipe(ctx, shopID, key, 1)
-	if err != nil || len(ded) == 0 {
-		if cache != nil {
-			cache[ck] = nil
-		}
-		return nil
-	}
-	if cache != nil {
-		cache[ck] = ded
-	}
-	return ded
+	return out
 }

@@ -676,11 +676,7 @@ func (s *ResolutionService) recipeOutputItemID(ctx context.Context, recipeKey st
 }
 
 func (s *ResolutionService) expandRecipe(ctx context.Context, shopID, recipeKey string, qty float64) ([]StockDeduction, error) {
-	// recipeKey: recipe id, code, item_id, or RecipeOutput.item_id (finished good → BOM)
-	key := strings.TrimSpace(recipeKey)
-	if key == "" {
-		return nil, nil
-	}
+	// recipeKey may be recipe.id or recipe_code
 	const rq = `
 		SELECT r.id, r.recipe_code
 		FROM "Recipe" r
@@ -692,20 +688,9 @@ func (s *ResolutionService) expandRecipe(ctx context.Context, shopID, recipeKey 
 		LIMIT 1
 	`
 	var recipeID, code string
-	err := s.pool.QueryRow(ctx, rq, key).Scan(&recipeID, &code)
+	err := s.pool.QueryRow(ctx, rq, recipeKey).Scan(&recipeID, &code)
 	if err != nil {
-		const oq = `
-			SELECT r.id, r.recipe_code
-			FROM "RecipeOutput" ro
-			JOIN "Recipe" r ON r.id = ro.recipe_id
-			WHERE r.is_active = true AND (
-				ro.item_id = $1 OR UPPER(TRIM(ro.item_id)) = UPPER(TRIM($1))
-			)
-			LIMIT 1
-		`
-		if err2 := s.pool.QueryRow(ctx, oq, key).Scan(&recipeID, &code); err2 != nil {
-			return nil, nil
-		}
+		return nil, nil // not a recipe — caller must pass real recipe_id
 	}
 
 	const iq = `

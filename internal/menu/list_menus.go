@@ -77,7 +77,6 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 
 		m := upsert(menuID)
 
-		// Root FG / recipe from create or adjust payloads (Menu legacy linkage)
 		if fg := firstStr(p, "finished_good_id", "finishedGoodId", "inventory_item_id", "inventoryItemId", "stock_item_id", "stockItemId"); fg != "" {
 			if !strings.HasPrefix(strings.ToUpper(fg), "MENU-") {
 				m.finishedGoodID = fg
@@ -254,7 +253,6 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				m.price = c.SellingPrice
 			}
 		}
-		// Catalog stocked SKU + explicit recipe (P0/P1)
 		if c.StockItemID != nil {
 			sid := strings.TrimSpace(*c.StockItemID)
 			if sid != "" && m.finishedGoodID == "" {
@@ -269,7 +267,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		}
 	}
 
-	// stock map + units — InventoryProjection only (Menu truth). No batch inflate.
+	// Stock = InventoryProjection only (Menu truth). Case-insensitive keys.
 	stock := map[string]float64{}
 	stockUnits := map[string]string{}
 	srows, _ := s.pool.Query(ctx, `
@@ -284,10 +282,11 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			if srows.Scan(&id, &a, &unit) == nil {
 				stock[id] = a
 				stockUnits[id] = unit
-				if u := strings.ToUpper(id); u != id {
-					if _, exists := stock[u]; !exists {
-						stock[u] = a
-						stockUnits[u] = unit
+				up := strings.ToUpper(id)
+				if up != id {
+					if _, ok := stock[up]; !ok {
+						stock[up] = a
+						stockUnits[up] = unit
 					}
 				}
 			}
@@ -312,26 +311,25 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			m.code = m.menuID
 		}
 
-		linesIn := m.lines
-		// FIXED catalog item with stock_item_id and no component lines
+		linesIn := append([]map[string]interface{}{}, m.lines...)
+		// Catalog FIXED: stock_item_id when no component lines
 		if len(linesIn) == 0 && m.finishedGoodID != "" {
 			need := m.quantityRequired
 			if need <= 0 {
 				need = 1
 			}
-			linesIn = []map[string]interface{}{
-				{
-					"componentType": "FIXED", "component_type": "FIXED",
-					"componentKey": "main", "component_key": "main",
-					"finishedGoodId": m.finishedGoodID, "finished_good_id": m.finishedGoodID,
-					"quantityRequired": need, "quantity_required": need,
-					"unit": firstNonEmpty(m.unit, "pcs"),
-				},
-			}
+			linesIn = []map[string]interface{}{{
+				"componentType": "FIXED", "component_type": "FIXED",
+				"componentKey": "main", "component_key": "main",
+				"finishedGoodId": m.finishedGoodID, "finished_good_id": m.finishedGoodID,
+				"quantityRequired": need, "quantity_required": need,
+				"unit": firstNonEmpty(m.unit, "pcs"),
+			}}
 		}
-
-		// P1: explicit recipe_id only — min over full BOM (unit-safe)
-		linesIn = s.enrichRecipeConstraints(ctx, shopID, linesIn, m.menuID, m.code, m.finishedGoodID, m.recipeID, recipeCache)
+		// PDF burgers: ONLY when explicit recipe_id (never guess by name)
+		if strings.TrimSpace(m.recipeID) != "" {
+			linesIn = s.enrichExplicitRecipe(ctx, shopID, m.recipeID, linesIn, recipeCache)
+		}
 
 		normLines, reqSel := normalizeMenuLines(linesIn, stock)
 		maxP, fgID := portionsFromLines(normLines, stock, stockUnits)
@@ -341,7 +339,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if maxP < 0 {
 			maxP = 0
 		}
-		// Price-only menus (no stock linkage): sellable for order UI
+		// Price-only (no stock lines): available
 		if maxP == 0 && len(normLines) == 0 && m.price > 0 {
 			maxP = 999
 		}
@@ -486,7 +484,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				if oid == "" {
 					continue
 				}
-				st := stockLookup(stock, oid)
+				st := stockGet(stock, oid)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": firstNonEmpty(firstStr(om, "finishedGoodName", "name"), oid),
@@ -501,7 +499,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				if oid == "" {
 					continue
 				}
-				st := stockLookup(stock, oid)
+				st := stockGet(stock, oid)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": oid, "unit": "pcs",
@@ -526,7 +524,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 }
 
 func portionsFromLines(lines []map[string]interface{}, stock map[string]float64, stockUnits map[string]string) (int, string) {
-	return ComputeMenuAvailability(lines, stock, stockUnits)
+	return computePortions(lines, stock, stockUnits)
 }
 
 func stringSliceAny(v interface{}) []string {
