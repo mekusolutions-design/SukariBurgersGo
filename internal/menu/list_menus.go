@@ -19,6 +19,8 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 	type menuRow struct {
 		menuID, name, code, category string
 		price                        float64
+		taxRate                      float64
+		available                    bool
 		createdAt                    string
 		visible                      bool
 		status                       string
@@ -32,7 +34,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if !ok {
 			m = &menuRow{
 				menuID: menuID, lines: []map[string]interface{}{},
-				visible: true, status: "active",
+				visible: true, available: true, taxRate: 16, status: "active",
 			}
 			byID[menuID] = m
 			order = append(order, menuID)
@@ -41,20 +43,14 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 	}
 
 	applyPayload := func(et string, p map[string]interface{}, created time.Time) {
-		if p == nil {
+		if p == nil || !menuEventMatchesShop(p, shopID) {
 			return
 		}
-		// The SQL query is already shop-scoped. Payloads from legacy events may
-		// omit shop_id, but an explicit different shop must never be merged.
-		if !menuEventMatchesShop(p, shopID) {
-			return
-		}
+		et = strings.ToLower(strings.TrimSpace(et))
 
 		menuID := firstStr(p, "menu_id", "menuId", "menu_item_id", "menuItemId")
 		if menuID == "" {
-			// Nest create: MENU-{code}
-			code := firstStr(p, "menu_code", "menuCode")
-			if code != "" {
+			if code := firstStr(p, "menu_code", "menuCode"); code != "" {
 				menuID = "MENU-" + code
 			}
 		}
@@ -65,24 +61,34 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			return
 		}
 
+		// NestJS ignores adjustments/additions for menus not yet created.
+		_, exists := byID[menuID]
+		if !exists && (et == "menu_adjusted" || et == "menu_updated") {
+			return
+		}
 		m := upsert(menuID)
 
-		if et == "menu_created" || et == "MENU_CREATED" || et == "menu_item_created" {
-			if n := firstStr(p, "name", "menu_name", "menuName"); n != "" {
-				m.name = n
+		isCreate := et == "menu_created" || et == "menu_item_created"
+		if isCreate {
+			if v := firstStr(p, "name", "menu_name", "menuName"); v != "" {
+				m.name = v
 			}
-			if c := firstStr(p, "menu_code", "menuCode"); c != "" {
-				m.code = c
+			if v := firstStr(p, "menu_code", "menuCode"); v != "" {
+				m.code = v
 			}
-			if c := firstStr(p, "category"); c != "" {
-				m.category = c
+			if v, ok := p["category"]; ok {
+				if v == nil {
+					m.category = ""
+				} else {
+					m.category = strings.TrimSpace(fmt.Sprint(v))
+				}
 			}
-			if pr := floatAny(p["selling_price"]); pr > 0 {
-				m.price = pr
-			} else if pr := floatAny(p["sellingPrice"]); pr > 0 {
-				m.price = pr
-			} else if pr := floatAny(p["price"]); pr > 0 {
-				m.price = pr
+			if v, ok := p["selling_price"]; ok {
+				m.price = floatAny(v)
+			} else if v, ok := p["sellingPrice"]; ok {
+				m.price = floatAny(v)
+			} else if v, ok := p["price"]; ok {
+				m.price = floatAny(v)
 			}
 			if v, ok := p["is_visible"].(bool); ok {
 				m.visible = v
@@ -90,49 +96,143 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			if v, ok := p["isVisible"].(bool); ok {
 				m.visible = v
 			}
-			if st := firstStr(p, "status"); st != "" {
-				m.status = st
+			if v, ok := p["is_available"].(bool); ok {
+				m.available = v
+			}
+			if v, ok := p["isAvailable"].(bool); ok {
+				m.available = v
+			}
+			if v, ok := p["tax_rate"]; ok {
+				m.taxRate = floatAny(v)
+			} else if v, ok := p["taxRate"]; ok {
+				m.taxRate = floatAny(v)
+			}
+			if v := firstStr(p, "status"); v != "" {
+				m.status = v
 			}
 			m.createdAt = created.UTC().Format(time.RFC3339)
 		}
 
-		// menu_item_added may only carry lines / component — ensure row exists
-		if et == "menu_item_added" {
-			if m.name == "" {
-				if n := firstStr(p, "name", "menu_name"); n != "" {
-					m.name = n
+		if et == "menu_adjusted" || et == "menu_updated" {
+			if v, ok := p["name"]; ok && v != nil {
+				m.name = strings.TrimSpace(fmt.Sprint(v))
+			}
+			if v, ok := p["selling_price"]; ok && v != nil {
+				m.price = floatAny(v)
+			} else if v, ok := p["sellingPrice"]; ok && v != nil {
+				m.price = floatAny(v)
+			}
+			if v, ok := p["category"]; ok {
+				if v == nil {
+					m.category = ""
+				} else {
+					m.category = strings.TrimSpace(fmt.Sprint(v))
+				}
+			}
+			if v, ok := p["is_available"].(bool); ok {
+				m.available = v
+			} else if v, ok := p["isAvailable"].(bool); ok {
+				m.available = v
+			}
+			if v, ok := p["is_visible"].(bool); ok {
+				m.visible = v
+			} else if v, ok := p["isVisible"].(bool); ok {
+				m.visible = v
+			}
+			if v, ok := p["tax_rate"]; ok && v != nil {
+				m.taxRate = floatAny(v)
+			} else if v, ok := p["taxRate"]; ok && v != nil {
+				m.taxRate = floatAny(v)
+			}
+			if v := firstStr(p, "menu_code", "menuCode"); v != "" {
+				m.code = v
+			}
+
+		}
+
+		if et == "menu_item_added" && m.name == "" {
+			m.name = firstStr(p, "name", "menu_name", "menuName")
+		}
+
+		lineKey := func(line map[string]interface{}, idx int) string {
+			key := firstStr(line, "component_key", "componentKey")
+			if key == "" {
+				key = firstStr(line, "finished_good_id", "finishedGoodId")
+			}
+			if key == "" {
+				key = fmt.Sprintf("line_%d", idx+1)
+			}
+			return key
+		}
+		mergeLine := func(line map[string]interface{}, idx int) {
+			key := lineKey(line, idx)
+			for i, old := range m.lines {
+				if lineKey(old, i) == key {
+					m.lines[i] = line
+					return
+				}
+			}
+			m.lines = append(m.lines, line)
+		}
+		replaceLines := func(raw []interface{}) {
+			m.lines = []map[string]interface{}{}
+			for i, value := range raw {
+				line, ok := value.(map[string]interface{})
+				if ok && line != nil {
+					mergeLine(line, i)
 				}
 			}
 		}
 
-		// Replace lines if menu_created brings full lines; append for item_added
-		appendLines := func(arr []interface{}) {
-			for _, e := range arr {
-				lm, _ := e.(map[string]interface{})
-				if lm == nil {
-					continue
+		if isCreate {
+			m.lines = []map[string]interface{}{}
+			if raw, ok := p["lines"].([]interface{}); ok && len(raw) > 0 {
+				replaceLines(raw)
+			} else if fg := firstStr(p, "finished_good_id", "finishedGoodId"); fg != "" {
+				mergeLine(map[string]interface{}{
+					"component_key": "main", "componentKey": "main",
+					"component_type": "FIXED", "componentType": "FIXED",
+					"finished_good_id": fg, "finishedGoodId": fg,
+					"quantity_required": float64(1), "quantityRequired": float64(1),
+					"unit": firstNonEmpty(firstStr(p, "unit"), "pcs"),
+				}, 0)
+			}
+			if raw, ok := p["components"].([]interface{}); ok {
+				for i, value := range raw {
+					if line, ok := value.(map[string]interface{}); ok && line != nil {
+						mergeLine(line, i)
+					}
 				}
-				m.lines = append(m.lines, lm)
 			}
-		}
-		if arr, ok := p["lines"].([]interface{}); ok && len(arr) > 0 {
-			if et == "menu_created" || et == "MENU_CREATED" || et == "menu_item_created" {
-				m.lines = nil
+		} else if et == "menu_adjusted" || et == "menu_updated" {
+			// Empty or omitted adjustment lines preserve the existing snapshot.
+			if raw, supplied := p["lines"]; supplied {
+				if arr, ok := raw.([]interface{}); ok && len(arr) > 0 {
+					replaceLines(arr)
+				}
 			}
-			appendLines(arr)
-		}
-		if arr, ok := p["components"].([]interface{}); ok {
-			appendLines(arr)
-		}
-		// Single component on menu_item_added
-		if et == "menu_item_added" {
-			if firstStr(p, "component_key", "componentKey", "finished_good_id", "finishedGoodId") != "" ||
-				len(stringSliceAny(p["option_item_ids"])) > 0 {
-				m.lines = append(m.lines, p)
+		} else {
+			if raw, ok := p["lines"].([]interface{}); ok {
+				for i, value := range raw {
+					if line, ok := value.(map[string]interface{}); ok && line != nil {
+						mergeLine(line, i)
+					}
+				}
+			}
+			if raw, ok := p["components"].([]interface{}); ok {
+				for i, value := range raw {
+					if line, ok := value.(map[string]interface{}); ok && line != nil {
+						mergeLine(line, i)
+					}
+				}
+			}
+			if et == "menu_item_added" &&
+				(firstStr(p, "component_key", "componentKey", "finished_good_id", "finishedGoodId") != "" ||
+					len(stringSliceAny(p["option_item_ids"])) > 0) {
+				mergeLine(p, len(m.lines))
 			}
 		}
 	}
-
 	// Query 1: shop-scoped events (Nest default)
 	loadEvents := func(shopFilter bool) {
 		var rows interface {
@@ -147,7 +247,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				SELECT event_type, payload, created_at FROM "Event"
 				WHERE shop_id = $1
 				  AND event_type IN (
-				    'menu_created','menu_item_added','menu_item_created','MENU_CREATED',
+				    'menu_created','menu_item_added','menu_item_created','menu_adjusted','menu_updated','MENU_CREATED',
 				    'menu_updated','MENU_ITEM_ADDED'
 				  )
 				ORDER BY created_at ASC
@@ -158,7 +258,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			r, e := s.pool.Query(ctx, `
 				SELECT event_type, payload, created_at FROM "Event"
 				WHERE event_type IN (
-				    'menu_created','menu_item_added','menu_item_created','MENU_CREATED',
+				    'menu_created','menu_item_added','menu_item_created','menu_adjusted','menu_updated','MENU_CREATED',
 				    'menu_updated','MENU_ITEM_ADDED'
 				  )
 				ORDER BY created_at ASC
@@ -203,11 +303,13 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 
 	// CatalogMenuItem merge
 	catalog, _ := s.ListCatalog(ctx, shopID)
+	recipeCache := map[string][]StockDeduction{}
 	for _, c := range catalog {
 		id := strings.TrimSpace(c.MenuItemID)
 		if id == "" {
 			continue
 		}
+
 		m, ok := byID[id]
 		if !ok {
 			m = upsert(id)
@@ -220,6 +322,32 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			}
 			if m.price <= 0 {
 				m.price = c.SellingPrice
+			}
+		}
+
+		// Do not override event-defined components or choice groups.
+		// Only materialize an explicit catalog link when no menu lines exist.
+		if len(m.lines) == 0 {
+			stockItemID := ""
+			if c.StockItemID != nil {
+				stockItemID = strings.TrimSpace(*c.StockItemID)
+			}
+
+			if stockItemID != "" {
+				m.lines = append(m.lines, map[string]interface{}{
+					"componentType":     "FIXED",
+					"component_type":    "FIXED",
+					"finishedGoodId":    stockItemID,
+					"finished_good_id":  stockItemID,
+					"quantityRequired":  float64(1),
+					"quantity_required": float64(1),
+					"unit":              "pcs",
+				})
+			} else if c.RecipeID != nil && strings.TrimSpace(*c.RecipeID) != "" {
+				// Expand only the explicitly linked recipe. Never guess by name.
+				m.lines = s.enrichExplicitRecipe(
+					ctx, shopID, *c.RecipeID, m.lines, recipeCache,
+				)
 			}
 		}
 	}
@@ -262,20 +390,16 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if maxP < 0 {
 			maxP = 0
 		}
-		// Sellable without stock linkage (price-only): show as available for order UI
-		if maxP == 0 && len(normLines) == 0 && m.price > 0 {
-			maxP = 999
-		}
 		item := map[string]interface{}{
 			"menuId": m.menuID, "menu_id": m.menuID, "id": m.menuID,
 			"menuItemId": m.menuID, "menu_item_id": m.menuID,
 			"menuCode": m.code, "menu_code": m.code,
 			"name": m.name, "category": nilIfEmpty(m.category),
 			"sellingPrice": m.price, "selling_price": m.price,
-			"taxRate": 16.0, "tax_rate": 16.0,
+			"taxRate": m.taxRate, "tax_rate": m.taxRate,
 			"lines":       normLines,
-			"isAvailable": maxP > 0, "is_available": maxP > 0,
-			"isVisible": true, "status": m.status,
+			"isAvailable": m.available && maxP > 0, "is_available": m.available && maxP > 0,
+			"isVisible": m.visible, "is_visible": m.visible, "status": m.status,
 			"maxPortions": maxP, "availableQuantity": maxP,
 			"finishedGoodId": fgID, "finished_good_id": fgID,
 			"unitCost": 0, "foodCost": 0, "margin": m.price,
