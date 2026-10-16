@@ -77,14 +77,16 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 
 		m := upsert(menuID)
 
-		// Nest: root finished_good_id / inventory_item_id on menu or primary FIXED line
-		if fg := firstStr(p, "finished_good_id", "finishedGoodId", "inventory_item_id", "inventoryItemId", "item_id", "itemId"); fg != "" {
-			// Prefer non-MENU ids as stock SKU (MENU-* is commercial id, not inventory)
+		// Root FG / recipe from create or adjust payloads (Menu legacy linkage)
+		if fg := firstStr(p, "finished_good_id", "finishedGoodId", "inventory_item_id", "inventoryItemId", "stock_item_id", "stockItemId"); fg != "" {
 			if !strings.HasPrefix(strings.ToUpper(fg), "MENU-") {
 				m.finishedGoodID = fg
 			} else if m.finishedGoodID == "" {
 				m.finishedGoodID = fg
 			}
+		}
+		if rid := firstStr(p, "recipe_id", "recipeId"); rid != "" {
+			m.recipeID = rid
 		}
 		if q := floatAny(p["quantity_required"]); q > 0 {
 			m.quantityRequired = q
@@ -133,7 +135,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			}
 		}
 
-		// Replace lines on create/adjust; append single component on item_added
+		// Replace lines if menu_created brings full lines; append for item_added
 		appendLines := func(arr []interface{}) {
 			for _, e := range arr {
 				lm, _ := e.(map[string]interface{})
@@ -143,28 +145,17 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				m.lines = append(m.lines, lm)
 			}
 		}
-		etU := strings.ToUpper(et)
-		replaceLines := etU == "MENU_CREATED" || etU == "MENU_ITEM_CREATED" ||
-			etU == "MENU_UPDATED" || etU == "MENU_ADJUSTED" ||
-			et == "menu_created" || et == "menu_item_created" ||
-			et == "menu_updated" || et == "menu_adjusted"
 		if arr, ok := p["lines"].([]interface{}); ok && len(arr) > 0 {
-			if replaceLines {
+			if et == "menu_created" || et == "MENU_CREATED" || et == "menu_item_created" {
 				m.lines = nil
 			}
 			appendLines(arr)
 		}
-		if arr, ok := p["components"].([]interface{}); ok && len(arr) > 0 {
-			if replaceLines && len(m.lines) == 0 {
-				// components-only payload on adjust
-			}
-			if replaceLines && p["lines"] == nil {
-				m.lines = nil
-			}
+		if arr, ok := p["components"].([]interface{}); ok {
 			appendLines(arr)
 		}
 		// Single component on menu_item_added
-		if et == "menu_item_added" || et == "MENU_ITEM_ADDED" {
+		if et == "menu_item_added" {
 			if firstStr(p, "component_key", "componentKey", "finished_good_id", "finishedGoodId") != "" ||
 				len(stringSliceAny(p["option_item_ids"])) > 0 {
 				m.lines = append(m.lines, p)
@@ -187,7 +178,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				WHERE shop_id = $1
 				  AND event_type IN (
 				    'menu_created','menu_item_added','menu_item_created','MENU_CREATED',
-				    'menu_updated','MENU_ITEM_ADDED','menu_adjusted','MENU_ADJUSTED'
+				    'menu_updated','MENU_ITEM_ADDED'
 				  )
 				ORDER BY created_at ASC
 				LIMIT 5000`, shopID)
@@ -198,7 +189,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				SELECT event_type, payload, created_at FROM "Event"
 				WHERE event_type IN (
 				    'menu_created','menu_item_added','menu_item_created','MENU_CREATED',
-				    'menu_updated','MENU_ITEM_ADDED','menu_adjusted','MENU_ADJUSTED'
+				    'menu_updated','MENU_ITEM_ADDED'
 				  )
 				ORDER BY created_at ASC
 				LIMIT 5000`)
@@ -263,7 +254,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				m.price = c.SellingPrice
 			}
 		}
-		// Catalog stocked SKU → POS FIXED availability (sodas, direct inventory)
+		// Catalog stocked SKU + explicit recipe (P0/P1)
 		if c.StockItemID != nil {
 			sid := strings.TrimSpace(*c.StockItemID)
 			if sid != "" && m.finishedGoodID == "" {
@@ -278,93 +269,30 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		}
 	}
 
-	// stock map + units (Item.unit) — required for g/ml vs pcs portion math
+	// stock map + units — InventoryProjection only (Menu truth). No batch inflate.
 	stock := map[string]float64{}
 	stockUnits := map[string]string{}
 	srows, _ := s.pool.Query(ctx, `
-		SELECT p.item_id, COALESCE(p.available_stock,0), COALESCE(i.unit, 'pcs')
+		SELECT p.item_id, COALESCE(p.available_stock,0), COALESCE(NULLIF(TRIM(i.unit), ''), 'pcs')
 		FROM "InventoryProjection" p
 		LEFT JOIN "Item" i ON i.item_id = p.item_id
-		WHERE p.shop_id=$1`, shopID)
+		WHERE p.shop_id = $1`, shopID)
 	if srows != nil {
 		for srows.Next() {
 			var id, unit string
 			var a float64
 			if srows.Scan(&id, &a, &unit) == nil {
 				stock[id] = a
-				if unit == "" {
-					unit = "pcs"
-				}
 				stockUnits[id] = unit
 				if u := strings.ToUpper(id); u != id {
 					if _, exists := stock[u]; !exists {
 						stock[u] = a
-					}
-					if _, exists := stockUnits[u]; !exists {
 						stockUnits[u] = unit
 					}
 				}
 			}
 		}
 		srows.Close()
-	}
-
-	// Fallback only when Menu/Nest projection has no row or zero — never inflate
-	// above available_stock (that made FIXED items "jump" on POS vs Menu).
-	brows, berr := s.pool.Query(ctx, `
-		SELECT item_id, COALESCE(SUM(qty_remaining), 0)
-		FROM "InventoryBatch"
-		WHERE shop_id = $1 AND COALESCE(qty_remaining, 0) > 0
-		  AND (expiry_date IS NULL OR expiry_date >= (CURRENT_TIMESTAMP AT TIME ZONE 'Africa/Nairobi')::date)
-		GROUP BY item_id`, shopID)
-	if berr == nil && brows != nil {
-		for brows.Next() {
-			var id string
-			var qty float64
-			if brows.Scan(&id, &qty) == nil && id != "" {
-				cur := stockLookup(stock, id)
-				if cur <= 0 && qty > 0 {
-					stock[id] = qty
-					if u := strings.ToUpper(id); u != id {
-						if _, exists := stock[u]; !exists {
-							stock[u] = qty
-						}
-					}
-				}
-			}
-		}
-		brows.Close()
-	}
-
-	// Name → stock index (menu "300 ml SODA" vs inventory "300ml soda")
-	stockByName := map[string]float64{}
-	nrows, nerr := s.pool.Query(ctx, `
-		SELECT i.item_id, i.name, COALESCE(p.available_stock, 0)
-		FROM "Item" i
-		LEFT JOIN "InventoryProjection" p
-		  ON p.item_id = i.item_id AND p.shop_id = $1
-	`, shopID)
-	if nerr == nil && nrows != nil {
-		for nrows.Next() {
-			var id, name string
-			var avail float64
-			if nrows.Scan(&id, &name, &avail) != nil {
-				continue
-			}
-			if avail <= 0 {
-				avail = stockLookup(stock, id)
-			}
-			if avail <= 0 {
-				continue
-			}
-			stock[id] = maxFloat(stockLookup(stock, id), avail)
-			for _, key := range stockNameKeys(name, id) {
-				if prev, ok := stockByName[key]; !ok || avail > prev {
-					stockByName[key] = avail
-				}
-			}
-		}
-		nrows.Close()
 	}
 
 	recipeCache := map[string][]StockDeduction{}
@@ -383,16 +311,13 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if m.code == "" {
 			m.code = m.menuID
 		}
+
 		linesIn := m.lines
-		// Nest: if no component lines but menu has finishedGoodId, synthesize FIXED line
+		// FIXED catalog item with stock_item_id and no component lines
 		if len(linesIn) == 0 && m.finishedGoodID != "" {
 			need := m.quantityRequired
 			if need <= 0 {
 				need = 1
-			}
-			unit := m.unit
-			if unit == "" {
-				unit = "pcs"
 			}
 			linesIn = []map[string]interface{}{
 				{
@@ -400,40 +325,14 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 					"componentKey": "main", "component_key": "main",
 					"finishedGoodId": m.finishedGoodID, "finished_good_id": m.finishedGoodID,
 					"quantityRequired": need, "quantity_required": need,
-					"unit": unit,
+					"unit": firstNonEmpty(m.unit, "pcs"),
 				},
 			}
 		}
-		// If lines exist but none carry a stock SKU, attach root FG as FIXED
-		if m.finishedGoodID != "" {
-			hasSKU := false
-			for _, lm := range linesIn {
-				if firstStr(lm, "finishedGoodId", "finished_good_id", "inventory_item_id") != "" {
-					hasSKU = true
-					break
-				}
-				if len(stringSliceAny(lm["option_item_ids"])) > 0 || len(stringSliceAny(lm["optionItemIds"])) > 0 {
-					hasSKU = true
-					break
-				}
-			}
-			if !hasSKU {
-				need := m.quantityRequired
-				if need <= 0 {
-					need = 1
-				}
-				linesIn = append(linesIn, map[string]interface{}{
-					"componentType": "FIXED", "component_type": "FIXED",
-					"componentKey": "main_fg", "component_key": "main_fg",
-					"finishedGoodId": m.finishedGoodID, "finished_good_id": m.finishedGoodID,
-					"quantityRequired": need, "quantity_required": need,
-					"unit": firstNonEmpty(m.unit, "pcs"),
-				})
-			}
-		}
-		linesIn = dedupeComponentLines(linesIn)
-		// Nest/ops: also constrain by recipe ingredients (bacon g, cheddar g, …)
-		linesIn = s.enrichLinesWithRecipeConstraints(ctx, shopID, linesIn, m.menuID, m.code, m.name, m.finishedGoodID, m.recipeID, recipeCache)
+
+		// P1: explicit recipe_id only — min over full BOM (unit-safe)
+		linesIn = s.enrichWithExplicitRecipe(ctx, shopID, m.recipeID, linesIn, recipeCache)
+
 		normLines, reqSel := normalizeMenuLines(linesIn, stock)
 		maxP, fgID := portionsFromLines(normLines, stock, stockUnits)
 		if fgID == "" && m.finishedGoodID != "" {
@@ -442,59 +341,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if maxP < 0 {
 			maxP = 0
 		}
-
-		// Menu-legacy sellable: component lines only (ignore synthetic recipe_* zeros
-		// when no explicit recipeID — FIXED/INVENTORY FG qty is the truth for POS chips).
-		if maxP == 0 && strings.TrimSpace(m.recipeID) == "" {
-			compOnly := make([]map[string]interface{}, 0, len(normLines))
-			for _, lm := range normLines {
-				ck := firstStr(lm, "componentKey", "component_key")
-				if strings.HasPrefix(strings.ToLower(ck), "recipe_") {
-					continue
-				}
-				compOnly = append(compOnly, lm)
-			}
-			if len(compOnly) > 0 {
-				if p2, fg2 := portionsFromLines(compOnly, stock, stockUnits); p2 > 0 {
-					maxP = p2
-					if fgID == "" {
-						fgID = fg2
-					}
-				}
-			}
-			// Root FG only when inventory is count (pcs). Never treat grams/ml as portion count.
-			if maxP == 0 && m.finishedGoodID != "" {
-				need := m.quantityRequired
-				if need <= 0 {
-					need = 1
-				}
-				have := stockLookup(stock, m.finishedGoodID)
-				hu := stockUnitLookup(stockUnits, m.finishedGoodID)
-				nu := firstNonEmpty(m.unit, "pcs")
-				p := portionsFromHaveNeed(have, need, hu, nu)
-				if p > 0 {
-					maxP = p
-					if fgID == "" {
-						fgID = m.finishedGoodID
-					}
-				}
-			}
-		}
-
-		// Name-based stock ONLY when there are no component SKU constraints
-		if maxP == 0 && !hasStockConstraints(normLines) {
-			need := m.quantityRequired
-			if need <= 0 {
-				need = 1
-			}
-			if av := stockByNameLookup(stockByName, m.name, m.code, m.menuID); av > 0 {
-				maxP = int(av / need)
-				if maxP < 0 {
-					maxP = 0
-				}
-			}
-		}
-		// Sellable without stock linkage (price-only)
+		// Price-only menus (no stock linkage): sellable for order UI
 		if maxP == 0 && len(normLines) == 0 && m.price > 0 {
 			maxP = 999
 		}
@@ -679,35 +526,8 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 }
 
 func portionsFromLines(lines []map[string]interface{}, stock map[string]float64, stockUnits map[string]string) (int, string) {
-	r := ComputeMenuAvailability(lines, stock, stockUnits)
-	return r.MaxPortions, r.FirstFG
+	return ComputeMenuAvailability(lines, stock, stockUnits)
 }
-
-
-func stockLookup(stock map[string]float64, itemID string) float64 {
-	if itemID == "" {
-		return 0
-	}
-	if v, ok := stock[itemID]; ok {
-		return v
-	}
-	// Case variants (menu events vs projection keys)
-	up := strings.ToUpper(itemID)
-	if v, ok := stock[up]; ok {
-		return v
-	}
-	low := strings.ToLower(itemID)
-	if v, ok := stock[low]; ok {
-		return v
-	}
-	for k, v := range stock {
-		if strings.EqualFold(k, itemID) {
-			return v
-		}
-	}
-	return 0
-}
-
 
 func stringSliceAny(v interface{}) []string {
 	out := []string{}
@@ -746,67 +566,4 @@ func nilIfEmpty(s string) interface{} {
 		return nil
 	}
 	return s
-}
-
-
-func maxFloat(a, b float64) float64 {
-	if a > b {
-		return a
-	}
-	return b
-}
-
-func normalizeStockKey(s string) string {
-	s = strings.ToLower(strings.TrimSpace(s))
-	var b strings.Builder
-	for _, r := range s {
-		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
-			b.WriteRune(r)
-		}
-	}
-	return b.String()
-}
-
-func stockNameKeys(name, itemID string) []string {
-	keys := []string{}
-	seen := map[string]bool{}
-	add := func(k string) {
-		k = normalizeStockKey(k)
-		if k == "" || seen[k] {
-			return
-		}
-		seen[k] = true
-		keys = append(keys, k)
-	}
-	add(name)
-	add(itemID)
-	// "300 ml SODA" / "300ml soda" / "SODA 300ML"
-	n := strings.ToLower(name + " " + itemID)
-	add(strings.ReplaceAll(n, " ", ""))
-	return keys
-}
-
-func stockByNameLookup(byName map[string]float64, parts ...string) float64 {
-	best := 0.0
-	for _, p := range parts {
-		for _, k := range stockNameKeys(p, "") {
-			if v, ok := byName[k]; ok && v > best {
-				best = v
-			}
-		}
-	}
-	// Partial contains: menu "PASSION JUICE" vs item "Passion juice"
-	if best <= 0 {
-		joined := normalizeStockKey(strings.Join(parts, " "))
-		if len(joined) >= 4 {
-			for k, v := range byName {
-				if strings.Contains(k, joined) || strings.Contains(joined, k) {
-					if v > best {
-						best = v
-					}
-				}
-			}
-		}
-	}
-	return best
 }
