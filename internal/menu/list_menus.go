@@ -25,6 +25,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		visible                      bool
 		status                       string
 		lines                        []map[string]interface{}
+		recipeID                     string
 	}
 	byID := map[string]*menuRow{}
 	order := []string{}
@@ -67,6 +68,9 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			return
 		}
 		m := upsert(menuID)
+		if rid := firstStr(p, "recipe_id", "recipeId"); rid != "" {
+			m.recipeID = rid
+		}
 
 		isCreate := et == "menu_created" || et == "menu_item_created"
 		if isCreate {
@@ -344,9 +348,10 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 					"unit":              "pcs",
 				})
 			} else if c.RecipeID != nil && strings.TrimSpace(*c.RecipeID) != "" {
-				// Expand only the explicitly linked recipe. Never guess by name.
+				// Nest parity: explicit catalog recipe_id → full ingredient constraints
+				m.recipeID = strings.TrimSpace(*c.RecipeID)
 				m.lines = s.enrichExplicitRecipe(
-					ctx, shopID, *c.RecipeID, m.lines, recipeCache,
+					ctx, shopID, m.recipeID, m.lines, recipeCache,
 				)
 			}
 		}
@@ -383,7 +388,13 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if m.code == "" {
 			m.code = m.menuID
 		}
-		normLines, reqSel := normalizeMenuLines(m.lines, stock, stockUnits)
+		linesIn := m.lines
+		// Nest parity: when catalog/event carries recipe_id, constrain by full BOM
+		// (same numeric min Nest shows when lines include every ingredient).
+		if rid := strings.TrimSpace(m.recipeID); rid != "" {
+			linesIn = s.enrichExplicitRecipe(ctx, shopID, rid, linesIn, recipeCache)
+		}
+		normLines, reqSel := normalizeMenuLines(linesIn, stock, stockUnits)
 		maxP, fgID := portionsFromLines(normLines, stock, stockUnits)
 		// Fast path only Ã¢â‚¬â€ no per-menu ResolveMenuItemLine (that made POS load 30s+)
 		// Menus with no linked lines/stock still appear; availability shows 0 / 86'd
@@ -555,7 +566,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				st := stockGet(stock, oid)
 				optionUnit := stockUnitFor(unitsByID, oid, firstNonEmpty(firstStr(om, "unit"), "pcs"))
 				needUnit := firstNonEmpty(firstStr(n, "unit"), "pcs")
-				optionPortions := portionOne(st, need, optionUnit, needUnit)
+				optionPortions := portionNestParity(st, need, optionUnit, needUnit)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": firstNonEmpty(firstStr(om, "finishedGoodName", "name"), oid),
@@ -573,7 +584,7 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				st := stockGet(stock, oid)
 				optionUnit := stockUnitFor(unitsByID, oid, "pcs")
 				needUnit := firstNonEmpty(firstStr(n, "unit"), "pcs")
-				optionPortions := portionOne(st, need, optionUnit, needUnit)
+				optionPortions := portionNestParity(st, need, optionUnit, needUnit)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": oid, "unit": optionUnit,

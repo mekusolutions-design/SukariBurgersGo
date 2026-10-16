@@ -7,6 +7,7 @@ import (
 	"github.com/restflow/api-go/internal/units"
 )
 
+// MenuAvailabilityResult mirrors Nest listMenus availability fields.
 type MenuAvailabilityResult struct {
 	MaxPortions int
 	IsAvailable bool
@@ -42,8 +43,12 @@ func stockUnitFor(stockUnits map[string]string, id, fallback string) string {
 	return "pcs"
 }
 
-// ComputeMenuAvailability calculates the minimum portions across required
-// lines. The optional unit map contains authoritative stock units when known.
+// ComputeMenuAvailability — Nest MenuService.listMenus parity:
+//
+//	min over FIXED/INVENTORY lines of floor(available_stock / quantity_required)
+//	CHOICE/MULTI_CHOICE: floor(sum(option stocks) / quantity_required)
+//
+// Lines without a stock SKU are skipped (Nest continues; does not 86 the whole item).
 func ComputeMenuAvailability(
 	lines []map[string]interface{},
 	stock map[string]float64,
@@ -53,7 +58,6 @@ func ComputeMenuAvailability(
 	if len(stockUnits) > 0 {
 		unitsByID = stockUnits[0]
 	}
-
 	portions, _ := computePortions(lines, stock, unitsByID)
 	if portions < 0 {
 		portions = 0
@@ -95,6 +99,7 @@ func computePortions(
 		}
 
 		componentType := strings.ToUpper(firstStr(line, "componentType", "component_type"))
+		// Nest: need = Math.max(quantityRequired || 1, 0.0001)
 		need := floatAny(line["quantityRequired"])
 		if need <= 0 {
 			need = floatAny(line["quantity_required"])
@@ -102,55 +107,56 @@ func computePortions(
 		if need <= 0 {
 			need = 1
 		}
-		needUnit := firstStr(line, "unit")
-		if needUnit == "" {
-			needUnit = "pcs"
+		if need < 0.0001 {
+			need = 0.0001
 		}
 
-		ids := collectLineIDs(line)
+		needUnit := firstStr(line, "unit")
 		finishedGoodID := firstStr(
 			line,
 			"finishedGoodId", "finished_good_id",
 			"inventory_item_id", "inventoryItemId",
 		)
 
-		// For FIXED lines, an explicit finished good is authoritative.
-		// This prevents stale option IDs from inflating or limiting availability.
-		if componentType == "FIXED" && finishedGoodID != "" {
-			ids = []string{finishedGoodID}
+		ids := collectLineIDs(line)
+
+		// Nest FIXED/INVENTORY: only the finished_good_id (not stale option_item_ids)
+		if componentType == "FIXED" || componentType == "INVENTORY" || componentType == "" {
+			if finishedGoodID != "" {
+				ids = []string{finishedGoodID}
+			}
 		}
+
 		if len(ids) == 0 {
-			// A required component without an inventory link cannot be
-			// counted as sellable; fail closed instead of ignoring it.
-			return 0, firstFG
+			// Nest skips drafts with no finishedGoodId — does NOT zero the whole menu
+			continue
 		}
 		if firstFG == "" {
 			firstFG = ids[0]
 		}
 
-		// FIXED without an explicit finished good uses its inventory options.
-		// CHOICE and MULTI_CHOICE retain summed alternative availability.
-		if (componentType == "FIXED" && finishedGoodID == "") ||
-			componentType == "CHOICE" ||
-			componentType == "MULTI_CHOICE" {
-			// Calculate each alternative independently using its stock unit.
-			// Sum sellable portions, not incompatible raw stock quantities.
-			totalPortions := 0
+		if componentType == "CHOICE" || componentType == "MULTI_CHOICE" {
+			// Nest: floor(sum(option.availableStock) / need)
+			total := 0.0
 			for _, id := range ids {
-				have := stockGet(stock, id)
-				haveUnit := stockUnitFor(stockUnits, id, needUnit)
-				totalPortions += portionOne(have, need, haveUnit, needUnit)
+				total += stockGet(stock, id)
 			}
-			if totalPortions < minPortions {
-				minPortions = totalPortions
+			p := int(math.Floor(total / need))
+			if p < 0 {
+				p = 0
+			}
+			if p < minPortions {
+				minPortions = p
 			}
 			continue
 		}
 
+		// FIXED / INVENTORY / default: Nest floor(snapshot.available / need)
+		// Prefer numeric Nest path; only convert when need unit is explicitly mass/volume.
 		for _, id := range ids {
 			have := stockGet(stock, id)
 			haveUnit := stockUnitFor(stockUnits, id, needUnit)
-			p := portionOne(have, need, haveUnit, needUnit)
+			p := portionNestParity(have, need, haveUnit, needUnit)
 			if p < minPortions {
 				minPortions = p
 			}
@@ -163,7 +169,9 @@ func computePortions(
 	return minPortions, firstFG
 }
 
-func portionOne(have, need float64, haveUnit, needUnit string) int {
+// portionNestParity matches Nest Math.floor(available / need) in the common case.
+// When recipe lines carry unit g/ml, convert stock into that unit first.
+func portionNestParity(have, need float64, haveUnit, needUnit string) int {
 	if need <= 0 {
 		need = 1
 	}
@@ -171,38 +179,31 @@ func portionOne(have, need float64, haveUnit, needUnit string) int {
 		return 0
 	}
 
-	haveNormalized := units.NormalizeUnit(haveUnit)
-	needNormalized := units.NormalizeUnit(needUnit)
-
-	// Preserve legacy handling for a mis-tagged volume unit on a fixed
-	// count-based sellable (e.g. a soda SKU tagged ml but sold in pcs).
-	// Mass inventory must never be treated as a count of pieces.
-	if needNormalized == "pcs" {
-		if haveNormalized == "g" || haveNormalized == "kg" {
+	nu := units.NormalizeUnit(needUnit)
+	switch nu {
+	case "g", "kg", "ml", "l":
+		haveBase, haveDim := units.ToBaseQuantity(have, firstNonEmpty(haveUnit, nu))
+		needBase, needDim := units.ToBaseQuantity(need, nu)
+		if haveDim != units.DimOther && needDim != units.DimOther && haveDim != needDim {
+			// Cannot convert — Nest would still divide raw numbers; use raw as fallback
+			return int(math.Floor(have / need))
+		}
+		if needBase <= 0 {
 			return 0
 		}
+		p := int(math.Floor(haveBase / needBase))
+		if p < 0 {
+			return 0
+		}
+		return p
+	default:
+		// Nest FIXED path: Math.floor(available / need) — no unit gate
 		p := int(math.Floor(have / need))
 		if p < 0 {
 			return 0
 		}
 		return p
 	}
-
-	haveBase, haveDimension := units.ToBaseQuantity(have, haveUnit)
-	needBase, needDimension := units.ToBaseQuantity(need, needUnit)
-
-	if haveDimension == units.DimOther ||
-		needDimension == units.DimOther ||
-		haveDimension != needDimension ||
-		needBase <= 0 {
-		return 0
-	}
-
-	p := int(math.Floor(haveBase / needBase))
-	if p < 0 {
-		return 0
-	}
-	return p
 }
 
 func collectLineIDs(line map[string]interface{}) []string {
@@ -250,4 +251,9 @@ func collectLineIDs(line map[string]interface{}) []string {
 	}
 
 	return ids
+}
+
+// computePortions is used by list_menus portionsFromLines.
+func computePortionsExport(lines []map[string]interface{}, stock map[string]float64, stockUnits map[string]string) (int, string) {
+	return computePortions(lines, stock, stockUnits)
 }
