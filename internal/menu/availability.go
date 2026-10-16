@@ -4,8 +4,14 @@ import (
 	"math"
 	"strings"
 
-	"github.com/mekusolutions-design/SukariBurgersGo/internal/units"
+	"github.com/restflow/api-go/internal/units"
 )
+
+type MenuAvailabilityResult struct {
+	MaxPortions int
+	IsAvailable bool
+	Lines       []map[string]interface{}
+}
 
 func stockGet(stock map[string]float64, id string) float64 {
 	if id == "" || stock == nil {
@@ -14,81 +20,147 @@ func stockGet(stock map[string]float64, id string) float64 {
 	if v, ok := stock[id]; ok {
 		return v
 	}
-	if v, ok := stock[strings.ToUpper(id)]; ok {
-		return v
-	}
-	if v, ok := stock[strings.ToLower(id)]; ok {
-		return v
+	for key, v := range stock {
+		if strings.EqualFold(key, id) {
+			return v
+		}
 	}
 	return 0
 }
 
-func unitGet(stockUnits map[string]string, id string) string {
-	if id == "" || stockUnits == nil {
-		return "pcs"
+func stockUnitFor(stockUnits map[string]string, id, fallback string) string {
+	if stockUnits != nil {
+		for key, unit := range stockUnits {
+			if strings.EqualFold(key, id) && strings.TrimSpace(unit) != "" {
+				return unit
+			}
+		}
 	}
-	if u, ok := stockUnits[id]; ok && u != "" {
-		return u
-	}
-	if u, ok := stockUnits[strings.ToUpper(id)]; ok && u != "" {
-		return u
+	if strings.TrimSpace(fallback) != "" {
+		return fallback
 	}
 	return "pcs"
 }
 
-// computePortions — baseline FIXED math + unit-safe recipe ingredient needs.
-func computePortions(lines []map[string]interface{}, stock map[string]float64, stockUnits map[string]string) (int, string) {
+// ComputeMenuAvailability calculates the minimum portions across required
+// lines. The optional unit map contains authoritative stock units when known.
+func ComputeMenuAvailability(
+	lines []map[string]interface{},
+	stock map[string]float64,
+	stockUnits ...map[string]string,
+) MenuAvailabilityResult {
+	var unitsByID map[string]string
+	if len(stockUnits) > 0 {
+		unitsByID = stockUnits[0]
+	}
+
+	portions, _ := computePortions(lines, stock, unitsByID)
+	if portions < 0 {
+		portions = 0
+	}
+	return MenuAvailabilityResult{
+		MaxPortions: portions,
+		IsAvailable: portions > 0,
+		Lines:       lines,
+	}
+}
+
+func hasStockConstraints(lines []map[string]interface{}) bool {
+	for _, line := range lines {
+		if line == nil {
+			continue
+		}
+		if len(collectLineIDs(line)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func computePortions(
+	lines []map[string]interface{},
+	stock map[string]float64,
+	stockUnits map[string]string,
+) (int, string) {
 	if len(lines) == 0 {
 		return 0, ""
 	}
-	minP := math.MaxInt32
+
+	minPortions := math.MaxInt32
 	firstFG := ""
-	for _, lm := range lines {
-		ct := strings.ToUpper(firstStr(lm, "componentType", "component_type"))
-		need := floatAny(lm["quantityRequired"])
+
+	for _, line := range lines {
+		if line == nil {
+			continue
+		}
+
+		componentType := strings.ToUpper(firstStr(line, "componentType", "component_type"))
+		need := floatAny(line["quantityRequired"])
 		if need <= 0 {
-			need = floatAny(lm["quantity_required"])
+			need = floatAny(line["quantity_required"])
 		}
 		if need <= 0 {
 			need = 1
 		}
-		needUnit := firstStr(lm, "unit")
+		needUnit := firstStr(line, "unit")
 		if needUnit == "" {
 			needUnit = "pcs"
 		}
 
-		ids := collectLineIDs(lm)
+		ids := collectLineIDs(line)
+		finishedGoodID := firstStr(
+			line,
+			"finishedGoodId", "finished_good_id",
+			"inventory_item_id", "inventoryItemId",
+		)
+
+		// For FIXED lines, an explicit finished good is authoritative.
+		// This prevents stale option IDs from inflating or limiting availability.
+		if componentType == "FIXED" && finishedGoodID != "" {
+			ids = []string{finishedGoodID}
+		}
 		if len(ids) == 0 {
-			continue
+			// A required component without an inventory link cannot be
+			// counted as sellable; fail closed instead of ignoring it.
+			return 0, firstFG
 		}
 		if firstFG == "" {
 			firstFG = ids[0]
 		}
 
-		if ct == "CHOICE" || ct == "MULTI_CHOICE" {
-			total := 0.0
+		// FIXED without an explicit finished good uses its inventory options.
+		// CHOICE and MULTI_CHOICE retain summed alternative availability.
+		if (componentType == "FIXED" && finishedGoodID == "") ||
+			componentType == "CHOICE" ||
+			componentType == "MULTI_CHOICE" {
+			// Calculate each alternative independently using its stock unit.
+			// Sum sellable portions, not incompatible raw stock quantities.
+			totalPortions := 0
 			for _, id := range ids {
-				total += stockGet(stock, id)
+				have := stockGet(stock, id)
+				haveUnit := stockUnitFor(stockUnits, id, needUnit)
+				totalPortions += portionOne(have, need, haveUnit, needUnit)
 			}
-			p := int(math.Floor(total / need))
-			if p < minP {
-				minP = p
+			if totalPortions < minPortions {
+				minPortions = totalPortions
 			}
 			continue
 		}
 
 		for _, id := range ids {
 			have := stockGet(stock, id)
-			p := portionOne(have, need, unitGet(stockUnits, id), needUnit)
-			if p < minP {
-				minP = p
+			haveUnit := stockUnitFor(stockUnits, id, needUnit)
+			p := portionOne(have, need, haveUnit, needUnit)
+			if p < minPortions {
+				minPortions = p
 			}
 		}
 	}
-	if minP == math.MaxInt32 || minP < 0 {
+
+	if minPortions == math.MaxInt32 || minPortions < 0 {
 		return 0, firstFG
 	}
-	return minP, firstFG
+	return minPortions, firstFG
 }
 
 func portionOne(have, need float64, haveUnit, needUnit string) int {
@@ -98,53 +170,84 @@ func portionOne(have, need float64, haveUnit, needUnit string) int {
 	if have <= 0 {
 		return 0
 	}
-	nu := units.NormalizeUnit(needUnit)
-	// Recipe ingredients (g/ml): convert then divide
-	if nu == "g" || nu == "kg" || nu == "ml" || nu == "l" {
-		haveBase, hDim := units.ToBaseQuantity(have, firstNonEmpty(haveUnit, nu))
-		needBase, nDim := units.ToBaseQuantity(need, nu)
-		if hDim != units.DimOther && nDim != units.DimOther && hDim != nDim {
+
+	haveNormalized := units.NormalizeUnit(haveUnit)
+	needNormalized := units.NormalizeUnit(needUnit)
+
+	// Preserve legacy handling for a mis-tagged volume unit on a fixed
+	// count-based sellable (e.g. a soda SKU tagged ml but sold in pcs).
+	// Mass inventory must never be treated as a count of pieces.
+	if needNormalized == "pcs" {
+		if haveNormalized == "g" || haveNormalized == "kg" {
 			return 0
 		}
-		if needBase <= 0 {
-			return 0
-		}
-		p := int(math.Floor(haveBase / needBase))
+		p := int(math.Floor(have / need))
 		if p < 0 {
 			return 0
 		}
 		return p
 	}
-	// Baseline FIXED / pcs
-	p := int(math.Floor(have / need))
+
+	haveBase, haveDimension := units.ToBaseQuantity(have, haveUnit)
+	needBase, needDimension := units.ToBaseQuantity(need, needUnit)
+
+	if haveDimension == units.DimOther ||
+		needDimension == units.DimOther ||
+		haveDimension != needDimension ||
+		needBase <= 0 {
+		return 0
+	}
+
+	p := int(math.Floor(haveBase / needBase))
 	if p < 0 {
 		return 0
 	}
 	return p
 }
 
-func collectLineIDs(lm map[string]interface{}) []string {
+func collectLineIDs(line map[string]interface{}) []string {
 	ids := []string{}
-	if fg := firstStr(lm, "finishedGoodId", "finished_good_id", "inventory_item_id", "inventoryItemId"); fg != "" {
-		ids = append(ids, fg)
+	seen := map[string]bool{}
+
+	add := func(id string) {
+		id = strings.TrimSpace(id)
+		key := strings.ToUpper(id)
+		if id != "" && !seen[key] {
+			seen[key] = true
+			ids = append(ids, id)
+		}
 	}
-	ids = append(ids, stringSliceAny(lm["option_item_ids"])...)
-	ids = append(ids, stringSliceAny(lm["optionItemIds"])...)
-	if opts, ok := lm["options"].([]map[string]interface{}); ok {
-		for _, o := range opts {
-			if oid := firstStr(o, "finishedGoodId", "finished_good_id", "item_id", "itemId"); oid != "" {
-				ids = append(ids, oid)
+
+	add(firstStr(line,
+		"finishedGoodId", "finished_good_id",
+		"inventory_item_id", "inventoryItemId"))
+
+	for _, key := range []string{"option_item_ids", "optionItemIds", "option_items", "optionItems"} {
+		for _, id := range stringSliceAny(line[key]) {
+			add(id)
+		}
+	}
+
+	addOptions := func(options []interface{}) {
+		for _, option := range options {
+			if m, ok := option.(map[string]interface{}); ok {
+				add(firstStr(m,
+					"finishedGoodId", "finished_good_id",
+					"item_id", "itemId"))
 			}
 		}
 	}
-	if opts, ok := lm["options"].([]interface{}); ok {
-		for _, o := range opts {
-			if om, ok := o.(map[string]interface{}); ok {
-				if oid := firstStr(om, "finishedGoodId", "finished_good_id", "item_id", "itemId"); oid != "" {
-					ids = append(ids, oid)
-				}
-			}
+
+	switch options := line["options"].(type) {
+	case []interface{}:
+		addOptions(options)
+	case []map[string]interface{}:
+		raw := make([]interface{}, 0, len(options))
+		for _, option := range options {
+			raw = append(raw, option)
 		}
+		addOptions(raw)
 	}
+
 	return ids
 }

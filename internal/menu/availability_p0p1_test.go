@@ -8,22 +8,22 @@ func TestP0_FixedSodaPcs(t *testing.T) {
 	}
 	stock := map[string]float64{"SODA-300": 34}
 	units := map[string]string{"SODA-300": "pcs"}
-	p, _ := ComputeMenuAvailability(lines, stock, units)
-	if p != 34 {
-		t.Fatalf("soda expected 34, got %d", p)
+	r := ComputeMenuAvailability(lines, stock, units)
+	if r.MaxPortions != 34 {
+		t.Fatalf("soda expected 34, got %d", r.MaxPortions)
 	}
 }
 
 func TestP0_SodaEvenIfItemUnitOdd(t *testing.T) {
-	// Baseline behaviour: projection count / need — do not 86 because unit string is weird
+	// Preserve count-based availability for a mis-tagged soda unit.
 	lines := []map[string]interface{}{
 		{"componentType": "FIXED", "finishedGoodId": "SODA-300", "quantityRequired": 1.0, "unit": "pcs"},
 	}
 	stock := map[string]float64{"SODA-300": 34}
 	units := map[string]string{"SODA-300": "ml"} // mis-tagged unit must not zero FIXED pcs need
-	p, _ := ComputeMenuAvailability(lines, stock, units)
-	if p != 34 {
-		t.Fatalf("expected 34 with need pcs, got %d", p)
+	r := ComputeMenuAvailability(lines, stock, units)
+	if r.MaxPortions != 34 {
+		t.Fatalf("expected 34 with need pcs, got %d", r.MaxPortions)
 	}
 }
 
@@ -32,9 +32,9 @@ func TestP0_CaseInsensitiveStock(t *testing.T) {
 		{"componentType": "FIXED", "finishedGoodId": "soda-300", "quantityRequired": 1.0, "unit": "pcs"},
 	}
 	stock := map[string]float64{"SODA-300": 10}
-	p, _ := ComputeMenuAvailability(lines, stock, nil)
-	if p != 10 {
-		t.Fatalf("expected 10, got %d", p)
+	r := ComputeMenuAvailability(lines, stock, nil)
+	if r.MaxPortions != 10 {
+		t.Fatalf("expected 10, got %d", r.MaxPortions)
 	}
 }
 
@@ -45,9 +45,9 @@ func TestP1_RecipeBaconMin(t *testing.T) {
 	}
 	stock := map[string]float64{"LETTUCE": 7, "BACON": 82.5}
 	units := map[string]string{"LETTUCE": "pcs", "BACON": "g"}
-	p, _ := ComputeMenuAvailability(lines, stock, units)
-	if p != 2 {
-		t.Fatalf("expected 2, got %d", p)
+	r := ComputeMenuAvailability(lines, stock, units)
+	if r.MaxPortions != 2 {
+		t.Fatalf("expected 2, got %d", r.MaxPortions)
 	}
 }
 
@@ -58,9 +58,9 @@ func TestP1_RecipeCheddar86(t *testing.T) {
 	}
 	stock := map[string]float64{"LETTUCE": 7, "CHEDDAR": 6.5}
 	units := map[string]string{"LETTUCE": "pcs", "CHEDDAR": "g"}
-	p, _ := ComputeMenuAvailability(lines, stock, units)
-	if p != 0 {
-		t.Fatalf("expected 0, got %d", p)
+	r := ComputeMenuAvailability(lines, stock, units)
+	if r.MaxPortions != 0 {
+		t.Fatalf("expected 0, got %d", r.MaxPortions)
 	}
 }
 
@@ -71,8 +71,235 @@ func TestP1_DoubleBacon(t *testing.T) {
 	}
 	stock := map[string]float64{"LETTUCE": 7, "BACON": 82.5}
 	units := map[string]string{"LETTUCE": "pcs", "BACON": "g"}
-	p, _ := ComputeMenuAvailability(lines, stock, units)
-	if p != 1 {
-		t.Fatalf("expected 1, got %d", p)
+	r := ComputeMenuAvailability(lines, stock, units)
+	if r.MaxPortions != 1 {
+		t.Fatalf("expected 1, got %d", r.MaxPortions)
+	}
+}
+
+// Regression: a FIXED finished good is authoritative; stale options are ignored.
+func TestP1_FixedFinishedGoodIgnoresStaleOptions(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "FIXED",
+			"finishedGoodId":   "BURGER-FG",
+			"option_item_ids":  []string{"STALE-ZERO-STOCK"},
+			"quantityRequired": 1.0,
+			"unit":             "pcs",
+		},
+	}
+	stock := map[string]float64{"BURGER-FG": 5, "STALE-ZERO-STOCK": 0}
+	r := ComputeMenuAvailability(lines, stock)
+	if r.MaxPortions != 5 {
+		t.Fatalf("expected 5 portions from the fixed finished good, got %d", r.MaxPortions)
+	}
+}
+
+// Regression: FIXED without a finished good uses its inventory options.
+func TestP1_FixedWithoutFinishedGoodSumsOptions(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "FIXED",
+			"option_item_ids":  []string{"OPTION-A", "OPTION-B"},
+			"quantityRequired": 2.0,
+			"unit":             "pcs",
+		},
+	}
+	stock := map[string]float64{"OPTION-A": 2, "OPTION-B": 4}
+	r := ComputeMenuAvailability(lines, stock)
+	if r.MaxPortions != 3 {
+		t.Fatalf("expected 3 portions from summed options, got %d", r.MaxPortions)
+	}
+}
+
+// Regression: CHOICE availability is the combined stock of its alternatives.
+func TestP1_ChoiceSumsOptions(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "CHOICE",
+			"option_item_ids":  []string{"SODA-A", "SODA-B"},
+			"quantityRequired": 2.0,
+			"unit":             "pcs",
+		},
+	}
+	stock := map[string]float64{"SODA-A": 10, "SODA-B": 32}
+	r := ComputeMenuAvailability(lines, stock)
+	if r.MaxPortions != 21 {
+		t.Fatalf("expected 21 portions from 42 units / 2, got %d", r.MaxPortions)
+	}
+}
+
+// Regression: gram-based stock must never be interpreted as a count of pieces.
+func TestP1_MassStockCannotSatisfyPieces(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "FIXED",
+			"finishedGoodId":   "BULK-INGREDIENT",
+			"quantityRequired": 1.0,
+			"unit":             "pcs",
+		},
+	}
+	stock := map[string]float64{"BULK-INGREDIENT": 49953}
+	stockUnits := map[string]string{"BULK-INGREDIENT": "g"}
+	r := ComputeMenuAvailability(lines, stock, stockUnits)
+	if r.MaxPortions != 0 {
+		t.Fatalf("expected 0 portions for grams required as pieces, got %d", r.MaxPortions)
+	}
+}
+
+// Regression: the explicit BACON-G ID must not be replaced by BACON-PCS.
+func TestP1_BaconGDoesNotUseBaconPCS(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "FIXED",
+			"finishedGoodId":   "BACON-G",
+			"option_item_ids":  []string{"BACON-PCS"},
+			"quantityRequired": 30.0,
+			"unit":             "g",
+		},
+	}
+	stock := map[string]float64{"BACON-G": 82.5, "BACON-PCS": 10000}
+	stockUnits := map[string]string{"BACON-G": "g", "BACON-PCS": "pcs"}
+	r := ComputeMenuAvailability(lines, stock, stockUnits)
+	if r.MaxPortions != 2 {
+		t.Fatalf("expected 2 portions from BACON-G only, got %d", r.MaxPortions)
+	}
+}
+
+// Regression: quantityRequired must be used when calculating portions.
+func TestP1_SodaQuantityRequiredTwo(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "FIXED",
+			"finishedGoodId":   "SODA-300",
+			"quantityRequired": 2.0,
+			"unit":             "pcs",
+		},
+	}
+	stock := map[string]float64{"SODA-300": 42}
+	r := ComputeMenuAvailability(lines, stock)
+	if r.MaxPortions != 21 {
+		t.Fatalf("expected 21 portions from 42 / 2, got %d", r.MaxPortions)
+	}
+}
+
+// Regression: alternative stock quantities with incompatible units must not
+// be added as raw quantities. Only sellable portions should be summed.
+func TestP1_ChoiceAlternativesWithMixedStockUnits(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "CHOICE",
+			"option_item_ids":  []string{"BULK-INGREDIENT", "SODA-300"},
+			"quantityRequired": 2.0,
+			"unit":             "pcs",
+		},
+	}
+
+	stock := map[string]float64{
+		"BULK-INGREDIENT": 49953,
+		"SODA-300":        4,
+	}
+	stockUnits := map[string]string{
+		"BULK-INGREDIENT": "g",
+		"SODA-300":        "pcs",
+	}
+
+	result := ComputeMenuAvailability(lines, stock, stockUnits)
+	if result.MaxPortions != 2 {
+		t.Fatalf("expected 2 portions from 4 soda units at 2 per portion; got %d", result.MaxPortions)
+	}
+}
+
+// Regression: a menu with one linked ingredient and one required component
+// lacking an inventory link must not report positive sellable availability.
+func TestP1_MissingRequiredStockLinkBlocksAvailability(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "FIXED",
+			"finishedGoodId":   "LETTUCE",
+			"quantityRequired": 1.0,
+			"unit":             "pcs",
+		},
+		{
+			"componentType":    "FIXED",
+			"quantityRequired": 1.0,
+			"unit":             "pcs",
+		},
+	}
+
+	stock := map[string]float64{
+		"LETTUCE": 7,
+	}
+
+	result := ComputeMenuAvailability(lines, stock)
+	if result.MaxPortions != 0 {
+		t.Fatalf("expected 0 portions when a required component has no stock link; got %d", result.MaxPortions)
+	}
+	if result.IsAvailable {
+		t.Fatal("menu must not be available when a required component has no stock link")
+	}
+}
+
+// Regression: legacy option_items accepts object-shaped inventory references.
+func TestP1_LegacyOptionItemsObjectReferences(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType": "CHOICE",
+			"option_items": []interface{}{
+				map[string]interface{}{"item_id": "A"},
+				map[string]interface{}{"finishedGoodId": "B"},
+			},
+			"quantityRequired": 1.0,
+			"unit":             "pcs",
+		},
+	}
+	result := ComputeMenuAvailability(lines, map[string]float64{"A": 2, "B": 3})
+	if result.MaxPortions != 5 {
+		t.Fatalf("legacy object options expected 5 portions, got %d", result.MaxPortions)
+	}
+}
+
+// Regression: camelCase optionItems remains supported by availability calculation.
+func TestP1_LegacyCamelCaseOptionItems(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "CHOICE",
+			"optionItems":      []interface{}{"A", "B"},
+			"quantityRequired": 1.0,
+			"unit":             "pcs",
+		},
+	}
+	result := ComputeMenuAvailability(lines, map[string]float64{"A": 2, "B": 3})
+	if result.MaxPortions != 5 {
+		t.Fatalf("camelCase options expected 5 portions, got %d", result.MaxPortions)
+	}
+}
+
+// Production-path regression: camelCase optionItems must survive normalization.
+func TestP1_NormalizeMenuLinesCamelCaseOptionItems(t *testing.T) {
+	lines := []map[string]interface{}{
+		{
+			"componentType":    "CHOICE",
+			"optionItems":      []interface{}{"A", "B"},
+			"quantityRequired": 1.0,
+			"unit":             "pcs",
+		},
+	}
+
+	stock := map[string]float64{"A": 2, "B": 3}
+	normalized, requiresSelection := normalizeMenuLines(lines, stock)
+	if !requiresSelection {
+		t.Fatal("CHOICE line should require selection")
+	}
+	if len(normalized) != 1 {
+		t.Fatalf("expected one normalized line, got %d", len(normalized))
+	}
+	ids := stringSliceAny(normalized[0]["option_item_ids"])
+	if len(ids) != 2 {
+		t.Fatalf("expected both option IDs after normalization, got %v", ids)
+	}
+	portions, _ := portionsFromLines(normalized, stock)
+	if portions != 5 {
+		t.Fatalf("expected 5 sellable portions after normalization, got %d", portions)
 	}
 }

@@ -133,7 +133,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		}
 	}
 
-	// ── Query 1: shop-scoped events (Nest default) ─────────
+	// Query 1: shop-scoped events (Nest default)
 	loadEvents := func(shopFilter bool) {
 		var rows interface {
 			Next() bool
@@ -201,7 +201,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 	// must not inherit another shop's menu. CatalogMenuItem remains shop-scoped.
 	loadEvents(true)
 
-	// ── CatalogMenuItem merge ─────────────────────────────
+	// CatalogMenuItem merge
 	catalog, _ := s.ListCatalog(ctx, shopID)
 	for _, c := range catalog {
 		id := strings.TrimSpace(c.MenuItemID)
@@ -226,13 +226,15 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 
 	// stock map
 	stock := map[string]float64{}
-	srows, _ := s.pool.Query(ctx, `SELECT item_id, COALESCE(available_stock,0) FROM "InventoryProjection" WHERE shop_id=$1`, shopID)
+	stockUnits := map[string]string{}
+	srows, _ := s.pool.Query(ctx, `SELECT p.item_id, COALESCE(p.available_stock,0), COALESCE(i.unit,'') FROM "InventoryProjection" p LEFT JOIN "Item" i ON i.item_id = p.item_id WHERE p.shop_id=$1`, shopID)
 	if srows != nil {
 		for srows.Next() {
-			var id string
+			var id, unit string
 			var a float64
-			if srows.Scan(&id, &a) == nil {
+			if srows.Scan(&id, &a, &unit) == nil {
 				stock[id] = a
+				stockUnits[id] = unit
 			}
 		}
 		srows.Close()
@@ -253,9 +255,9 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if m.code == "" {
 			m.code = m.menuID
 		}
-		normLines, reqSel := normalizeMenuLines(m.lines, stock)
-		maxP, fgID := portionsFromLines(normLines, stock)
-		// Fast path only — no per-menu ResolveMenuItemLine (that made POS load 30s+)
+		normLines, reqSel := normalizeMenuLines(m.lines, stock, stockUnits)
+		maxP, fgID := portionsFromLines(normLines, stock, stockUnits)
+		// Fast path only Ã¢â‚¬â€ no per-menu ResolveMenuItemLine (that made POS load 30s+)
 		// Menus with no linked lines/stock still appear; availability shows 0 / 86'd
 		if maxP < 0 {
 			maxP = 0
@@ -365,12 +367,16 @@ func floatAny(v interface{}) float64 {
 }
 
 // normalizeMenuLines ensures web POS never sees undefined options/lines.
-func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64) ([]map[string]interface{}, bool) {
+func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64, stockUnits ...map[string]string) ([]map[string]interface{}, bool) {
 	if lines == nil {
 		return []map[string]interface{}{}, false
 	}
 	out := make([]map[string]interface{}, 0, len(lines))
 	requiresSelection := false
+	var unitsByID map[string]string
+	if len(stockUnits) > 0 {
+		unitsByID = stockUnits[0]
+	}
 	for _, lm := range lines {
 		if lm == nil {
 			continue
@@ -406,6 +412,9 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 		}
 		if len(optIDs) == 0 {
 			optIDs = stringSliceAny(n["option_items"])
+			if len(optIDs) == 0 {
+				optIDs = stringSliceAny(n["optionItems"])
+			}
 		}
 
 		opts := []map[string]interface{}{}
@@ -419,13 +428,16 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				if oid == "" {
 					continue
 				}
-				st := stock[oid]
+				st := stockGet(stock, oid)
+				optionUnit := stockUnitFor(unitsByID, oid, firstNonEmpty(firstStr(om, "unit"), "pcs"))
+				needUnit := firstNonEmpty(firstStr(n, "unit"), "pcs")
+				optionPortions := portionOne(st, need, optionUnit, needUnit)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
 					"finishedGoodName": firstNonEmpty(firstStr(om, "finishedGoodName", "name"), oid),
-					"unit":             firstNonEmpty(firstStr(om, "unit"), "pcs"),
+					"unit":             optionUnit,
 					"availableStock":   st, "available_stock": st,
-					"unitCost": floatAny(om["unitCost"]), "maxPortions": int(st / need),
+					"unitCost": floatAny(om["unitCost"]), "maxPortions": optionPortions,
 				})
 			}
 		}
@@ -434,12 +446,15 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 				if oid == "" {
 					continue
 				}
-				st := stock[oid]
+				st := stockGet(stock, oid)
+				optionUnit := stockUnitFor(unitsByID, oid, "pcs")
+				needUnit := firstNonEmpty(firstStr(n, "unit"), "pcs")
+				optionPortions := portionOne(st, need, optionUnit, needUnit)
 				opts = append(opts, map[string]interface{}{
 					"finishedGoodId": oid, "finished_good_id": oid,
-					"finishedGoodName": oid, "unit": "pcs",
+					"finishedGoodName": oid, "unit": optionUnit,
 					"availableStock": st, "available_stock": st,
-					"unitCost": 0, "maxPortions": int(st / need),
+					"unitCost": 0, "maxPortions": optionPortions,
 				})
 			}
 		}
@@ -458,74 +473,16 @@ func normalizeMenuLines(lines []map[string]interface{}, stock map[string]float64
 	return out, requiresSelection
 }
 
-func portionsFromLines(lines []map[string]interface{}, stock map[string]float64) (int, string) {
-	if len(lines) == 0 {
-		return 0, ""
+func portionsFromLines(
+	lines []map[string]interface{},
+	stock map[string]float64,
+	stockUnits ...map[string]string,
+) (int, string) {
+	var unitsByID map[string]string
+	if len(stockUnits) > 0 {
+		unitsByID = stockUnits[0]
 	}
-	maxP := 1 << 30
-	firstFG := ""
-	for _, lm := range lines {
-		ct := strings.ToUpper(firstStr(lm, "componentType", "component_type"))
-		need := floatAny(lm["quantityRequired"])
-		if need <= 0 {
-			need = floatAny(lm["quantity_required"])
-		}
-		if need <= 0 {
-			need = 1
-		}
-		ids := []string{}
-		if fg := firstStr(lm, "finishedGoodId", "finished_good_id"); fg != "" {
-			ids = append(ids, fg)
-		}
-		ids = append(ids, stringSliceAny(lm["option_item_ids"])...)
-		ids = append(ids, stringSliceAny(lm["optionItemIds"])...)
-		if opts, ok := lm["options"].([]map[string]interface{}); ok {
-			for _, o := range opts {
-				if oid := firstStr(o, "finishedGoodId", "finished_good_id"); oid != "" {
-					ids = append(ids, oid)
-				}
-			}
-		}
-		if opts, ok := lm["options"].([]interface{}); ok {
-			for _, o := range opts {
-				if om, ok := o.(map[string]interface{}); ok {
-					if oid := firstStr(om, "finishedGoodId", "finished_good_id"); oid != "" {
-						ids = append(ids, oid)
-					}
-				}
-			}
-		}
-		if len(ids) == 0 {
-			continue
-		}
-		if firstFG == "" {
-			firstFG = ids[0]
-		}
-		if ct == "CHOICE" || ct == "MULTI_CHOICE" {
-			total := 0.0
-			for _, id := range ids {
-				total += stock[id]
-			}
-			p := int(total / need)
-			if p < maxP {
-				maxP = p
-			}
-			continue
-		}
-		for _, id := range ids {
-			p := int(stock[id] / need)
-			if p < maxP {
-				maxP = p
-			}
-		}
-	}
-	if maxP == 1<<30 {
-		return 0, firstFG
-	}
-	if maxP < 0 {
-		maxP = 0
-	}
-	return maxP, firstFG
+	return computePortions(lines, stock, unitsByID)
 }
 
 func stringSliceAny(v interface{}) []string {
