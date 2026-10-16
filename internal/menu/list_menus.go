@@ -329,14 +329,20 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			}
 		}
 
-		// Do not override event-defined components or choice groups.
-		// Only materialize an explicit catalog link when no menu lines exist.
+		// Always take catalog recipe_id / stock_item_id so POS matches Menu (Nest).
+		// Event lines alone are often incomplete (e.g. lettuce only) — without
+		// catalog recipe_id, burgers never see bacon/cheddar constraints.
+		if c.RecipeID != nil {
+			if rid := strings.TrimSpace(*c.RecipeID); rid != "" {
+				m.recipeID = rid
+			}
+		}
+		// Only materialize stock_item FIXED when no component lines yet (sodas, etc.)
 		if len(m.lines) == 0 {
 			stockItemID := ""
 			if c.StockItemID != nil {
 				stockItemID = strings.TrimSpace(*c.StockItemID)
 			}
-
 			if stockItemID != "" {
 				m.lines = append(m.lines, map[string]interface{}{
 					"componentType":     "FIXED",
@@ -347,12 +353,6 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 					"quantity_required": float64(1),
 					"unit":              "pcs",
 				})
-			} else if c.RecipeID != nil && strings.TrimSpace(*c.RecipeID) != "" {
-				// Nest parity: explicit catalog recipe_id → full ingredient constraints
-				m.recipeID = strings.TrimSpace(*c.RecipeID)
-				m.lines = s.enrichExplicitRecipe(
-					ctx, shopID, m.recipeID, m.lines, recipeCache,
-				)
 			}
 		}
 	}
@@ -368,6 +368,12 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 			if srows.Scan(&id, &a, &unit) == nil {
 				stock[id] = a
 				stockUnits[id] = unit
+				if u := strings.ToUpper(id); u != id {
+					if _, ok := stock[u]; !ok {
+						stock[u] = a
+						stockUnits[u] = unit
+					}
+				}
 			}
 		}
 		srows.Close()
@@ -400,6 +406,10 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		// Menus with no linked lines/stock still appear; availability shows 0 / 86'd
 		if maxP < 0 {
 			maxP = 0
+		}
+		// No stock constraints + sellable price → show available (Nest price-only items)
+		if maxP == 0 && len(normLines) == 0 && m.price > 0 && m.available {
+			maxP = 999
 		}
 		item := map[string]interface{}{
 			"menuId": m.menuID, "menu_id": m.menuID, "id": m.menuID,
