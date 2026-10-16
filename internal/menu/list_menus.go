@@ -428,13 +428,49 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		if fgID == "" && m.finishedGoodID != "" {
 			fgID = m.finishedGoodID
 		}
-		// Fast path only — no per-menu ResolveMenuItemLine (that made POS load 30s+)
-		// Menus with no linked lines/stock still appear; availability shows 0 / 86'd
 		if maxP < 0 {
 			maxP = 0
 		}
+
+		// Menu-legacy sellable: component lines only (ignore synthetic recipe_* zeros
+		// when no explicit recipeID — FIXED/INVENTORY FG qty is the truth for POS chips).
+		if maxP == 0 && strings.TrimSpace(m.recipeID) == "" {
+			compOnly := make([]map[string]interface{}, 0, len(normLines))
+			for _, lm := range normLines {
+				ck := firstStr(lm, "componentKey", "component_key")
+				if strings.HasPrefix(strings.ToLower(ck), "recipe_") {
+					continue
+				}
+				compOnly = append(compOnly, lm)
+			}
+			if len(compOnly) > 0 {
+				if p2, fg2 := portionsFromLines(compOnly, stock); p2 > 0 {
+					maxP = p2
+					if fgID == "" {
+						fgID = fg2
+					}
+				}
+			}
+			// Root finished good / catalog stock item — same as Menu page FG availability
+			if maxP == 0 && m.finishedGoodID != "" {
+				need := m.quantityRequired
+				if need <= 0 {
+					need = 1
+				}
+				have := stockLookup(stock, m.finishedGoodID)
+				if have > 0 {
+					maxP = int(have / need)
+					if maxP < 0 {
+						maxP = 0
+					}
+					if fgID == "" {
+						fgID = m.finishedGoodID
+					}
+				}
+			}
+		}
+
 		// Name-based stock ONLY when there are no component SKU constraints
-		// (sodas/juices). Never override multi-line recipe/burger min-portions.
 		if maxP == 0 && !hasStockConstraints(normLines) {
 			need := m.quantityRequired
 			if need <= 0 {
@@ -447,7 +483,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 				}
 			}
 		}
-		// Sellable without stock linkage (price-only): show as available for order UI
+		// Sellable without stock linkage (price-only)
 		if maxP == 0 && len(normLines) == 0 && m.price > 0 {
 			maxP = 999
 		}
