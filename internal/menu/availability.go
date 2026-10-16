@@ -7,7 +7,11 @@ import (
 	"github.com/mekusolutions-design/SukariBurgersGo/internal/units"
 )
 
-// portionsFromHaveNeed: unit-safe floor(have/need). Never treat grams as pcs portions.
+// portionsFromHaveNeed — Nest/Menu-aligned.
+//
+// • need in g/ml (recipe ingredients): convert to same base, then floor divide.
+// • need in pcs / empty (FIXED sellable): raw projection qty / need — same as the
+//   working baseline. Do NOT zero sodas when Item.unit is oddly set.
 func portionsFromHaveNeed(have, need float64, haveUnit, needUnit string) int {
 	if need <= 0 {
 		need = 1
@@ -15,38 +19,38 @@ func portionsFromHaveNeed(have, need float64, haveUnit, needUnit string) int {
 	if have <= 0 {
 		return 0
 	}
-	haveU := units.NormalizeUnit(haveUnit)
 	needU := units.NormalizeUnit(needUnit)
-	if needU == "" {
-		needU = "pcs"
-	}
-	if haveU == "" {
-		haveU = needU
-	}
+	haveU := units.NormalizeUnit(haveUnit)
 
-	haveBase, haveDim := units.ToBaseQuantity(have, haveU)
-	needBase, needDim := units.ToBaseQuantity(need, needU)
-
-	if haveDim != units.DimOther && needDim != units.DimOther && haveDim != needDim {
-		return 0
-	}
-	// Mass/volume with default need=1 pcs → refuse (avoids 49953-style chips)
-	if (haveDim == units.DimMass || haveDim == units.DimVolume) && need <= 1.0001 {
-		if needU == "pcs" {
+	switch needU {
+	case "g", "kg", "ml", "l":
+		haveBase, haveDim := units.ToBaseQuantity(have, firstNonEmpty(haveU, needU))
+		needBase, needDim := units.ToBaseQuantity(need, needU)
+		if haveDim != units.DimOther && needDim != units.DimOther && haveDim != needDim {
 			return 0
 		}
+		if needBase <= 0 {
+			return 0
+		}
+		p := int(math.Floor(haveBase / needBase))
+		if p < 0 {
+			return 0
+		}
+		if p > 9999 {
+			return 9999
+		}
+		return p
+	default:
+		// Baseline FIXED / pcs path
+		p := int(math.Floor(have / need))
+		if p < 0 {
+			return 0
+		}
+		if p > 9999 {
+			return 9999
+		}
+		return p
 	}
-	if needBase <= 0 {
-		return 0
-	}
-	p := int(math.Floor(haveBase / needBase))
-	if p < 0 {
-		return 0
-	}
-	if p > 9999 {
-		return 9999
-	}
-	return p
 }
 
 func stockLookup(stock map[string]float64, itemID string) float64 {
@@ -130,9 +134,7 @@ func ComputeMenuAvailability(lines []map[string]interface{}, stock map[string]fl
 		if ct == "CHOICE" || ct == "MULTI_CHOICE" {
 			total := 0.0
 			for _, id := range ids {
-				h := stockLookup(stock, id)
-				hu := stockUnitLookup(stockUnits, id)
-				total += units.ConvertQuantity(h, hu, needUnit)
+				total += stockLookup(stock, id)
 			}
 			p := portionsFromHaveNeed(total, need, needUnit, needUnit)
 			if p < minP {
@@ -141,16 +143,14 @@ func ComputeMenuAvailability(lines []map[string]interface{}, stock map[string]fl
 			continue
 		}
 
-		// FIXED / INVENTORY: each linked SKU is a hard constraint (use first FG id primarily)
-		// Baseline used min over each id; keep that for multi-id FIXED.
 		for _, id := range ids {
 			h := stockLookup(stock, id)
 			hu := stockUnitLookup(stockUnits, id)
 			nu := needUnit
-			// If line unit omitted but stock is mass and need looks like recipe grams, use stock unit
-			if firstStr(lm, "unit") == "" {
+			// Recipe line with qty in grams but unit omitted on line
+			if firstStr(lm, "unit") == "" && need > 1.0001 {
 				hn := units.NormalizeUnit(hu)
-				if (hn == "g" || hn == "ml") && need > 1.0001 {
+				if hn == "g" || hn == "ml" {
 					nu = hu
 				}
 			}

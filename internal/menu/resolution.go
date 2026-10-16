@@ -676,7 +676,7 @@ func (s *ResolutionService) recipeOutputItemID(ctx context.Context, recipeKey st
 }
 
 func (s *ResolutionService) expandRecipe(ctx context.Context, shopID, recipeKey string, qty float64) ([]StockDeduction, error) {
-	// recipeKey may be recipe.id, recipe_code, finished item_id, item_name, or RecipeOutput.item_id
+	// recipeKey: recipe id, code, item_id, or RecipeOutput.item_id (finished good → BOM)
 	key := strings.TrimSpace(recipeKey)
 	if key == "" {
 		return nil, nil
@@ -686,7 +686,6 @@ func (s *ResolutionService) expandRecipe(ctx context.Context, shopID, recipeKey 
 		FROM "Recipe" r
 		WHERE r.is_active = true AND (
 			r.id = $1 OR r.recipe_code = $1 OR r.item_id = $1
-			OR UPPER(TRIM(r.item_name)) = UPPER(TRIM($1))
 			OR UPPER(TRIM(r.recipe_code)) = UPPER(TRIM($1))
 			OR UPPER(TRIM(r.item_id)) = UPPER(TRIM($1))
 		)
@@ -695,7 +694,6 @@ func (s *ResolutionService) expandRecipe(ctx context.Context, shopID, recipeKey 
 	var recipeID, code string
 	err := s.pool.QueryRow(ctx, rq, key).Scan(&recipeID, &code)
 	if err != nil {
-		// Finished-good output SKU → parent recipe (burger FG → full BOM)
 		const oq = `
 			SELECT r.id, r.recipe_code
 			FROM "RecipeOutput" ro
@@ -705,9 +703,8 @@ func (s *ResolutionService) expandRecipe(ctx context.Context, shopID, recipeKey 
 			)
 			LIMIT 1
 		`
-		err2 := s.pool.QueryRow(ctx, oq, key).Scan(&recipeID, &code)
-		if err2 != nil {
-			return nil, nil // not a recipe
+		if err2 := s.pool.QueryRow(ctx, oq, key).Scan(&recipeID, &code); err2 != nil {
+			return nil, nil
 		}
 	}
 
@@ -1175,44 +1172,21 @@ func AggregateDeductions(rows []StockDeduction) []StockDeduction {
 // CheckAvailability ensures enough stock for deductions.
 func (s *ResolutionService) CheckAvailability(ctx context.Context, shopID string, deductions []StockDeduction) error {
 	for _, d := range deductions {
-		avail, err := s.lookupAvailableStock(ctx, shopID, d.ItemID)
+		const q = `
+			SELECT COALESCE(available_stock, 0)
+			FROM "InventoryProjection"
+			WHERE shop_id = $1 AND item_id = $2
+		`
+		var avail float64
+		err := s.pool.QueryRow(ctx, q, shopID, d.ItemID).Scan(&avail)
 		if err != nil || avail < d.Quantity {
-			have := avail
-			if err != nil {
-				have = 0
-			}
 			return apperrors.BadRequest(fmt.Sprintf(
 				"Insufficient stock for %s (%s): need %.4f, have %.4f",
-				d.ItemName, d.ItemID, d.Quantity, have,
+				d.ItemName, d.ItemID, d.Quantity, avail,
 			))
 		}
 	}
 	return nil
-}
-
-// lookupAvailableStock reads InventoryProjection with exact then case-insensitive item_id.
-func (s *ResolutionService) lookupAvailableStock(ctx context.Context, shopID, itemID string) (float64, error) {
-	const qExact = `
-		SELECT COALESCE(available_stock, 0)
-		FROM "InventoryProjection"
-		WHERE shop_id = $1 AND item_id = $2
-	`
-	var avail float64
-	err := s.pool.QueryRow(ctx, qExact, shopID, itemID).Scan(&avail)
-	if err == nil {
-		return avail, nil
-	}
-	const qCI = `
-		SELECT COALESCE(available_stock, 0)
-		FROM "InventoryProjection"
-		WHERE shop_id = $1 AND lower(item_id) = lower($2)
-		LIMIT 1
-	`
-	err2 := s.pool.QueryRow(ctx, qCI, shopID, itemID).Scan(&avail)
-	if err2 != nil {
-		return 0, err2
-	}
-	return avail, nil
 }
 
 // CheckAvailabilityTx verifies stock under a transaction with row locks (FOR UPDATE).

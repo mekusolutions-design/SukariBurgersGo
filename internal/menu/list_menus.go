@@ -331,7 +331,7 @@ func (s *ResolutionService) ListMenus(ctx context.Context, shopID string) ([]map
 		}
 
 		// P1: explicit recipe_id only — min over full BOM (unit-safe)
-		linesIn = s.enrichWithExplicitRecipe(ctx, shopID, m.recipeID, linesIn, recipeCache)
+		linesIn = s.enrichRecipeConstraints(ctx, shopID, linesIn, m.menuID, m.code, m.finishedGoodID, m.recipeID, recipeCache)
 
 		normLines, reqSel := normalizeMenuLines(linesIn, stock)
 		maxP, fgID := portionsFromLines(normLines, stock, stockUnits)
