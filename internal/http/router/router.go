@@ -9,6 +9,7 @@ import (
 	"github.com/restflow/api-go/internal/http/middleware"
 	"github.com/restflow/api-go/internal/observability"
 	"github.com/restflow/api-go/internal/realtime"
+	"github.com/restflow/api-go/internal/tenant"
 	"log/slog"
 )
 
@@ -39,6 +40,8 @@ type Deps struct {
 	RefillH        *handlers.RefillHandler
 	TraceH         *handlers.TraceHandler
 	Hub            *realtime.Hub
+	TenantResolver *tenant.Resolver
+	TenantStrict   bool
 }
 
 var (
@@ -53,12 +56,15 @@ var (
 	roleWaste   = []auth.Role{auth.RoleManager, auth.RoleKitchen, auth.RoleAdmin}
 )
 
-func protect(authSvc *auth.Service, roles []auth.Role, h http.HandlerFunc) http.Handler {
+func protect(d Deps, roles []auth.Role, h http.HandlerFunc) http.Handler {
 	var chain http.Handler = h
 	if len(roles) > 0 {
 		chain = middleware.RequireRoles(roles...)(chain)
 	}
-	return middleware.Authenticate(authSvc)(chain)
+	if d.TenantResolver != nil {
+		chain = middleware.AttachTenant(d.TenantResolver, d.TenantStrict)(chain)
+	}
+	return middleware.Authenticate(d.AuthSvc)(chain)
 }
 
 func New(d Deps) http.Handler {
@@ -89,129 +95,129 @@ func New(d Deps) http.Handler {
 			mux.Handle("GET /ws/"+ns, d.Hub.HandleNamespace(ns))
 		}
 	}
-	a := d.AuthSvc
 
-	mux.Handle("GET /users/me", protect(a, roleAll, d.UsersH.Me))
+
+	mux.Handle("GET /users/me", protect(d, roleAll, d.UsersH.Me))
 
 	// --- Web/Mobile parity aliases ---
-	mux.Handle("GET /auth/me", protect(a, roleAll, d.UsersH.AuthMe))
-	mux.Handle("POST /pos/orders", protect(a, rolePOS, d.POSH.CreateOrderAlias))
-	mux.Handle("GET /received", protect(a, roleRecv, d.ReceivedH.List))
-	mux.Handle("PUT /recipe/{recipeId}", protect(a, roleMgr, d.RecipeH.Update))
-	mux.Handle("POST /recipe/{recipeId}/outputs", protect(a, roleMgr, d.RecipeH.AddOutput))
-	mux.Handle("GET /notifications", protect(a, roleAll, d.NotificationsH.List))
-	mux.Handle("GET /notifications/settings", protect(a, roleAll, d.NotificationsH.Settings))
-	mux.Handle("PUT /notifications/settings", protect(a, roleAll, d.NotificationsH.Settings))
-	mux.Handle("POST /dashboard/rebuild-sales", protect(a, roleMgr, d.DashboardH.RebuildSales))
+	mux.Handle("GET /auth/me", protect(d, roleAll, d.UsersH.AuthMe))
+	mux.Handle("POST /pos/orders", protect(d, rolePOS, d.POSH.CreateOrderAlias))
+	mux.Handle("GET /received", protect(d, roleRecv, d.ReceivedH.List))
+	mux.Handle("PUT /recipe/{recipeId}", protect(d, roleMgr, d.RecipeH.Update))
+	mux.Handle("POST /recipe/{recipeId}/outputs", protect(d, roleMgr, d.RecipeH.AddOutput))
+	mux.Handle("GET /notifications", protect(d, roleAll, d.NotificationsH.List))
+	mux.Handle("GET /notifications/settings", protect(d, roleAll, d.NotificationsH.Settings))
+	mux.Handle("PUT /notifications/settings", protect(d, roleAll, d.NotificationsH.Settings))
+	mux.Handle("POST /dashboard/rebuild-sales", protect(d, roleMgr, d.DashboardH.RebuildSales))
 
-	mux.Handle("GET /users", protect(a, roleMgr, d.UsersH.List))
-	mux.Handle("GET /users/{id}", protect(a, roleMgr, d.UsersH.Get))
-	mux.Handle("PATCH /users/{id}/role", protect(a, roleAdmin, d.UsersH.UpdateRole))
+	mux.Handle("GET /users", protect(d, roleMgr, d.UsersH.List))
+	mux.Handle("GET /users/{id}", protect(d, roleMgr, d.UsersH.Get))
+	mux.Handle("PATCH /users/{id}/role", protect(d, roleAdmin, d.UsersH.UpdateRole))
 
-	mux.Handle("GET /inventory", protect(a, roleInv, d.InventoryH.List))
-	mux.Handle("GET /inventory/summary", protect(a, roleInv, d.InventoryH.Summary))
-	mux.Handle("GET /inventory/alerts", protect(a, roleInv, d.InventoryH.Alerts))
-	mux.Handle("GET /inventory/categories", protect(a, roleInv, d.InventoryH.Categories))
-	mux.Handle("GET /inventory/{itemId}/batches", protect(a, roleInv, d.InventoryH.Batches))
-	mux.Handle("GET /inventory/{itemId}", protect(a, roleInv, d.InventoryH.GetByItemID))
+	mux.Handle("GET /inventory", protect(d, roleInv, d.InventoryH.List))
+	mux.Handle("GET /inventory/summary", protect(d, roleInv, d.InventoryH.Summary))
+	mux.Handle("GET /inventory/alerts", protect(d, roleInv, d.InventoryH.Alerts))
+	mux.Handle("GET /inventory/categories", protect(d, roleInv, d.InventoryH.Categories))
+	mux.Handle("GET /inventory/{itemId}/batches", protect(d, roleInv, d.InventoryH.Batches))
+	mux.Handle("GET /inventory/{itemId}", protect(d, roleInv, d.InventoryH.GetByItemID))
 
-	mux.Handle("POST /received", protect(a, roleRecv, d.ReceivedH.Receive))
+	mux.Handle("POST /received", protect(d, roleRecv, d.ReceivedH.Receive))
 
-	mux.Handle("POST /payment/stripe", protect(a, rolePOS, d.PaymentH.CreateStripeIntent))
-	mux.Handle("POST /pos/order", protect(a, rolePOS, d.POSH.CreateOrder))
-	mux.Handle("GET /pos/menu-availability", protect(a, rolePOS, d.POSH.MenuAvailability))
-	mux.Handle("GET /pos/bootstrap", protect(a, rolePOSKit, d.POSH.Bootstrap))
-	mux.Handle("GET /pos/orders", protect(a, rolePOS, d.POSH.ListOrders))
-	mux.Handle("GET /pos/orders/{orderId}", protect(a, rolePOS, d.POSH.GetOrder))
-	mux.Handle("POST /pos/orders/{orderId}/send-to-kitchen", protect(a, rolePOS, d.POSH.SendToKitchen))
-	mux.Handle("POST /pos/orders/{orderId}/payment", protect(a, rolePOS, d.POSH.UpdatePayment))
+	mux.Handle("POST /payment/stripe", protect(d, rolePOS, d.PaymentH.CreateStripeIntent))
+	mux.Handle("POST /pos/order", protect(d, rolePOS, d.POSH.CreateOrder))
+	mux.Handle("GET /pos/menu-availability", protect(d, rolePOS, d.POSH.MenuAvailability))
+	mux.Handle("GET /pos/bootstrap", protect(d, rolePOSKit, d.POSH.Bootstrap))
+	mux.Handle("GET /pos/orders", protect(d, rolePOS, d.POSH.ListOrders))
+	mux.Handle("GET /pos/orders/{orderId}", protect(d, rolePOS, d.POSH.GetOrder))
+	mux.Handle("POST /pos/orders/{orderId}/send-to-kitchen", protect(d, rolePOS, d.POSH.SendToKitchen))
+	mux.Handle("POST /pos/orders/{orderId}/payment", protect(d, rolePOS, d.POSH.UpdatePayment))
 
-	mux.Handle("GET /kitchen/active-orders", protect(a, roleKitchen, d.KitchenH.ActiveOrders))
-	mux.Handle("GET /kitchen/production-history", protect(a, roleKitchen, d.KitchenH.ProductionHistory))
-	mux.Handle("GET /kitchen/production-queue", protect(a, roleKitchen, d.KitchenH.ProductionQueue))
-	mux.Handle("GET /kitchen/closing-stock", protect(a, roleKitchen, d.KitchenH.ClosingStock))
-	mux.Handle("POST /kitchen/closing-stock", protect(a, roleKitchen, d.KitchenH.SubmitClosingStock))
-	mux.Handle("POST /kitchen/orders/{orderId}/status", protect(a, roleKitchen, d.KitchenH.UpdateStatus))
-	mux.Handle("GET /kitchen/batches/{itemId}", protect(a, roleKitchen, d.KitchenH.Batches))
+	mux.Handle("GET /kitchen/active-orders", protect(d, roleKitchen, d.KitchenH.ActiveOrders))
+	mux.Handle("GET /kitchen/production-history", protect(d, roleKitchen, d.KitchenH.ProductionHistory))
+	mux.Handle("GET /kitchen/production-queue", protect(d, roleKitchen, d.KitchenH.ProductionQueue))
+	mux.Handle("GET /kitchen/closing-stock", protect(d, roleKitchen, d.KitchenH.ClosingStock))
+	mux.Handle("POST /kitchen/closing-stock", protect(d, roleKitchen, d.KitchenH.SubmitClosingStock))
+	mux.Handle("POST /kitchen/orders/{orderId}/status", protect(d, roleKitchen, d.KitchenH.UpdateStatus))
+	mux.Handle("GET /kitchen/batches/{itemId}", protect(d, roleKitchen, d.KitchenH.Batches))
 
 	// Recipe: no /recipe/{lit}/{id} next to /recipe/{id}/sub — ServeMux conflict.
 	// By-item lookup: RecipeH.Get falls back to item_id/recipe_code.
-	mux.Handle("GET /recipe/categories", protect(a, roleAll, d.RecipeH.Categories))
-	mux.Handle("GET /recipe", protect(a, roleAll, d.RecipeH.List))
-	mux.Handle("POST /recipe", protect(a, roleMgr, d.RecipeH.Create))
-	mux.Handle("POST /recipe/ingredient", protect(a, roleMgr, d.RecipeH.AddIngredient))
-	mux.Handle("GET /recipe/{recipeId}/availability", protect(a, roleAll, d.RecipeH.Availability))
-	mux.Handle("GET /recipe/{recipeId}/cost", protect(a, roleAll, d.RecipeH.Cost))
-	mux.Handle("GET /recipe/{recipeId}", protect(a, roleAll, d.RecipeH.Get))
+	mux.Handle("GET /recipe/categories", protect(d, roleAll, d.RecipeH.Categories))
+	mux.Handle("GET /recipe", protect(d, roleAll, d.RecipeH.List))
+	mux.Handle("POST /recipe", protect(d, roleMgr, d.RecipeH.Create))
+	mux.Handle("POST /recipe/ingredient", protect(d, roleMgr, d.RecipeH.AddIngredient))
+	mux.Handle("GET /recipe/{recipeId}/availability", protect(d, roleAll, d.RecipeH.Availability))
+	mux.Handle("GET /recipe/{recipeId}/cost", protect(d, roleAll, d.RecipeH.Cost))
+	mux.Handle("GET /recipe/{recipeId}", protect(d, roleAll, d.RecipeH.Get))
 
-	mux.Handle("POST /waste/record", protect(a, roleWaste, d.WasteH.Record))
-	mux.Handle("POST /waste", protect(a, roleWaste, d.WasteH.Record))
-	mux.Handle("POST /waste/write-off-expired", protect(a, roleMgr, d.WasteH.WriteOffExpired))
-	mux.Handle("GET /waste/expired-candidates", protect(a, roleWaste, d.WasteH.ExpiredCandidates))
-	mux.Handle("GET /waste/analytics", protect(a, roleMgr, d.WasteH.Analytics))
-	mux.Handle("GET /waste/events", protect(a, roleWaste, d.WasteH.Events))
-	mux.Handle("GET /waste/events/{eventId}", protect(a, roleWaste, d.WasteH.EventByID))
+	mux.Handle("POST /waste/record", protect(d, roleWaste, d.WasteH.Record))
+	mux.Handle("POST /waste", protect(d, roleWaste, d.WasteH.Record))
+	mux.Handle("POST /waste/write-off-expired", protect(d, roleMgr, d.WasteH.WriteOffExpired))
+	mux.Handle("GET /waste/expired-candidates", protect(d, roleWaste, d.WasteH.ExpiredCandidates))
+	mux.Handle("GET /waste/analytics", protect(d, roleMgr, d.WasteH.Analytics))
+	mux.Handle("GET /waste/events", protect(d, roleWaste, d.WasteH.Events))
+	mux.Handle("GET /waste/events/{eventId}", protect(d, roleWaste, d.WasteH.EventByID))
 
-	mux.Handle("POST /production/start", protect(a, roleKitchen, d.ProductionH.Start))
-	mux.Handle("POST /production/finish", protect(a, roleKitchen, d.ProductionH.Finish))
-	mux.Handle("POST /production/pre-prep", protect(a, roleKitchen, d.ProductionH.PrePrep))
-	mux.Handle("GET /production/history", protect(a, roleKitchen, d.ProductionH.History))
+	mux.Handle("POST /production/start", protect(d, roleKitchen, d.ProductionH.Start))
+	mux.Handle("POST /production/finish", protect(d, roleKitchen, d.ProductionH.Finish))
+	mux.Handle("POST /production/pre-prep", protect(d, roleKitchen, d.ProductionH.PrePrep))
+	mux.Handle("GET /production/history", protect(d, roleKitchen, d.ProductionH.History))
 
-	mux.Handle("POST /payment/mpesa", protect(a, rolePOS, d.PaymentH.MpesaSTK))
+	mux.Handle("POST /payment/mpesa", protect(d, rolePOS, d.PaymentH.MpesaSTK))
 
-	mux.Handle("GET /variance/batches", protect(a, roleMgr, d.VarianceH.ListBatches))
-	mux.Handle("GET /variance/batches/{batchId}", protect(a, roleMgr, d.VarianceH.GetBatch))
-	mux.Handle("POST /variance/batches/{batchId}/flag", protect(a, roleMgr, d.VarianceH.Flag))
-	mux.Handle("POST /variance/batches/{batchId}/reason", protect(a, roleMgr, d.VarianceH.Reason))
+	mux.Handle("GET /variance/batches", protect(d, roleMgr, d.VarianceH.ListBatches))
+	mux.Handle("GET /variance/batches/{batchId}", protect(d, roleMgr, d.VarianceH.GetBatch))
+	mux.Handle("POST /variance/batches/{batchId}/flag", protect(d, roleMgr, d.VarianceH.Flag))
+	mux.Handle("POST /variance/batches/{batchId}/reason", protect(d, roleMgr, d.VarianceH.Reason))
 
-	mux.Handle("GET /approvals/pending", protect(a, roleMgr, d.ApprovalsH.Pending))
-	mux.Handle("GET /approvals/history", protect(a, roleMgr, d.ApprovalsH.History))
-	mux.Handle("POST /approvals/{approvalId}/approve", protect(a, roleMgr, d.ApprovalsH.Approve))
-	mux.Handle("POST /approvals/{approvalId}/reject", protect(a, roleMgr, d.ApprovalsH.Reject))
+	mux.Handle("GET /approvals/pending", protect(d, roleMgr, d.ApprovalsH.Pending))
+	mux.Handle("GET /approvals/history", protect(d, roleMgr, d.ApprovalsH.History))
+	mux.Handle("POST /approvals/{approvalId}/approve", protect(d, roleMgr, d.ApprovalsH.Approve))
+	mux.Handle("POST /approvals/{approvalId}/reject", protect(d, roleMgr, d.ApprovalsH.Reject))
 
-	mux.Handle("POST /sync/bulk", protect(a, roleAll, d.SyncH.Bulk))
-	mux.Handle("GET /dashboard/summary", protect(a, roleMgr, d.DashboardH.Summary))
-	mux.Handle("GET /dashboard/kpis", protect(a, roleMgr, d.DashboardH.KPIs))
-	mux.Handle("GET /dashboard/alerts", protect(a, []auth.Role{auth.RoleManager, auth.RoleAdmin, auth.RoleKitchen}, d.DashboardH.Alerts))
-	mux.Handle("POST /notifications", protect(a, roleMgr, d.NotificationsH.Create))
+	mux.Handle("POST /sync/bulk", protect(d, roleAll, d.SyncH.Bulk))
+	mux.Handle("GET /dashboard/summary", protect(d, roleMgr, d.DashboardH.Summary))
+	mux.Handle("GET /dashboard/kpis", protect(d, roleMgr, d.DashboardH.KPIs))
+	mux.Handle("GET /dashboard/alerts", protect(d, []auth.Role{auth.RoleManager, auth.RoleAdmin, auth.RoleKitchen}, d.DashboardH.Alerts))
+	mux.Handle("POST /notifications", protect(d, roleMgr, d.NotificationsH.Create))
 
-	mux.Handle("GET /menu", protect(a, roleAll, d.MenuH.ListMenus))
-	mux.Handle("POST /menu", protect(a, roleAdmin, d.MenuH.CreateMenu))
-	mux.Handle("POST /menu/item", protect(a, roleAdmin, d.MenuH.CreateMenu))
-	mux.Handle("GET /menu/categories", protect(a, roleAll, d.MenuH.ListCategories))
-	mux.Handle("POST /menu/categories", protect(a, roleAdmin, d.MenuH.CreateCategory))
-	mux.Handle("GET /menu/finished-goods", protect(a, roleAll, d.MenuH.ListFinishedGoods))
-	mux.Handle("GET /menu/finished-good-categories", protect(a, roleAll, d.MenuH.ListFGCategories))
-	mux.Handle("POST /menu/finished-good-categories/assign", protect(a, roleAdmin, d.MenuH.AssignFGCategory))
-	mux.Handle("GET /menu/{menuId}/availability", protect(a, roleAll, d.MenuH.Availability))
-	mux.Handle("GET /menu/catalog-items", protect(a, roleAll, d.MenuH.ListCatalog))
-	mux.Handle("POST /menu/catalog-items", protect(a, roleAdmin, d.MenuH.CreateCatalog))
-	mux.Handle("GET /menu/combos", protect(a, roleAll, d.MenuH.ListCombos))
-	mux.Handle("POST /menu/combos", protect(a, roleAdmin, d.MenuH.CreateCombo))
-	mux.Handle("POST /menu/combos/preview", protect(a, rolePOSKit, d.MenuH.PreviewCombo))
+	mux.Handle("GET /menu", protect(d, roleAll, d.MenuH.ListMenus))
+	mux.Handle("POST /menu", protect(d, roleAdmin, d.MenuH.CreateMenu))
+	mux.Handle("POST /menu/item", protect(d, roleAdmin, d.MenuH.CreateMenu))
+	mux.Handle("GET /menu/categories", protect(d, roleAll, d.MenuH.ListCategories))
+	mux.Handle("POST /menu/categories", protect(d, roleAdmin, d.MenuH.CreateCategory))
+	mux.Handle("GET /menu/finished-goods", protect(d, roleAll, d.MenuH.ListFinishedGoods))
+	mux.Handle("GET /menu/finished-good-categories", protect(d, roleAll, d.MenuH.ListFGCategories))
+	mux.Handle("POST /menu/finished-good-categories/assign", protect(d, roleAdmin, d.MenuH.AssignFGCategory))
+	mux.Handle("GET /menu/{menuId}/availability", protect(d, roleAll, d.MenuH.Availability))
+	mux.Handle("GET /menu/catalog-items", protect(d, roleAll, d.MenuH.ListCatalog))
+	mux.Handle("POST /menu/catalog-items", protect(d, roleAdmin, d.MenuH.CreateCatalog))
+	mux.Handle("GET /menu/combos", protect(d, roleAll, d.MenuH.ListCombos))
+	mux.Handle("POST /menu/combos", protect(d, roleAdmin, d.MenuH.CreateCombo))
+	mux.Handle("POST /menu/combos/preview", protect(d, rolePOSKit, d.MenuH.PreviewCombo))
 
-	mux.Handle("GET /consumption/summary", protect(a, roleMgr, d.ConsumptionH.Summary))
-	mux.Handle("GET /consumption/products/{productId}", protect(a, roleMgr, d.ConsumptionH.Product))
-	mux.Handle("GET /consumption/menu-items/{menuItemId}", protect(a, roleMgr, d.ConsumptionH.MenuItem))
-	mux.Handle("GET /consumption/alerts", protect(a, roleMgr, d.ConsumptionH.Alerts))
+	mux.Handle("GET /consumption/summary", protect(d, roleMgr, d.ConsumptionH.Summary))
+	mux.Handle("GET /consumption/products/{productId}", protect(d, roleMgr, d.ConsumptionH.Product))
+	mux.Handle("GET /consumption/menu-items/{menuItemId}", protect(d, roleMgr, d.ConsumptionH.MenuItem))
+	mux.Handle("GET /consumption/alerts", protect(d, roleMgr, d.ConsumptionH.Alerts))
 
-	mux.Handle("GET /costing/sku/{itemId}", protect(a, roleAll, d.CostingH.SKU))
+	mux.Handle("GET /costing/sku/{itemId}", protect(d, roleAll, d.CostingH.SKU))
 
-	mux.Handle("GET /finished-goods", protect(a, roleAll, d.FinishedGoodsH.List))
-	mux.Handle("POST /finished-goods", protect(a, roleRecv, d.FinishedGoodsH.Add))
-	mux.Handle("POST /finished-goods/adjust", protect(a, roleMgr, d.FinishedGoodsH.Adjust))
+	mux.Handle("GET /finished-goods", protect(d, roleAll, d.FinishedGoodsH.List))
+	mux.Handle("POST /finished-goods", protect(d, roleRecv, d.FinishedGoodsH.Add))
+	mux.Handle("POST /finished-goods/adjust", protect(d, roleMgr, d.FinishedGoodsH.Adjust))
 
-	mux.Handle("GET /refill/pending", protect(a, roleKitchen, d.RefillH.Pending))
-	mux.Handle("GET /refill/requests/{requestId}", protect(a, roleKitchen, d.RefillH.Get))
-	mux.Handle("POST /refill/request", protect(a, roleKitchen, d.RefillH.Request))
-	mux.Handle("POST /refill/issue", protect(a, roleKitchen, d.RefillH.Issue))
+	mux.Handle("GET /refill/pending", protect(d, roleKitchen, d.RefillH.Pending))
+	mux.Handle("GET /refill/requests/{requestId}", protect(d, roleKitchen, d.RefillH.Get))
+	mux.Handle("POST /refill/request", protect(d, roleKitchen, d.RefillH.Request))
+	mux.Handle("POST /refill/issue", protect(d, roleKitchen, d.RefillH.Issue))
 
-	mux.Handle("GET /trace/diagnostics", protect(a, roleMgr, d.TraceH.Diagnostics))
-	mux.Handle("GET /trace", protect(a, roleMgr, d.TraceH.List))
-	mux.Handle("GET /trace/item/{itemId}", protect(a, roleMgr, d.TraceH.ByItem))
+	mux.Handle("GET /trace/diagnostics", protect(d, roleMgr, d.TraceH.Diagnostics))
+	mux.Handle("GET /trace", protect(d, roleMgr, d.TraceH.List))
+	mux.Handle("GET /trace/item/{itemId}", protect(d, roleMgr, d.TraceH.ByItem))
 
 	// Prefix handler for Nest GET /recipe/item/{itemId} (cannot register next to /recipe/{id}/availability)
-	byItem := protect(a, roleAll, handlers.RecipeByItemPath(d.RecipeH))
+	byItem := protect(d, roleAll, handlers.RecipeByItemPath(d.RecipeH))
 
 	var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodGet && len(r.URL.Path) > len("/recipe/item/") &&

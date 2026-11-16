@@ -34,6 +34,7 @@ import (
 	"github.com/restflow/api-go/internal/refill"
 	"github.com/restflow/api-go/internal/repository"
 	"github.com/restflow/api-go/internal/sync"
+	"github.com/restflow/api-go/internal/tenant"
 	"github.com/restflow/api-go/internal/trace"
 	"github.com/restflow/api-go/internal/variance"
 	"github.com/restflow/api-go/internal/waste"
@@ -73,8 +74,11 @@ func main() {
 	hub.Sio = sioSrv
 	projEngine.SetBroadcaster(hub) // append → project → emit (REST + WS + Socket.IO)
 
+	tenantResolver := tenant.NewResolver(pool)
+	tenantStrict := os.Getenv("TENANT_STRICT") == "true"
 	r := router.New(router.Deps{
 		Cfg: cfg, Log: log, AuthSvc: authSvc, Hub: hub,
+		TenantResolver: tenantResolver, TenantStrict: tenantStrict,
 		AuthH:          handlers.NewAuthHandler(authSvc),
 		UsersH:         handlers.NewUsersHandler(authSvc),
 		HealthH:        handlers.NewHealthHandler(pool),
